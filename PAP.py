@@ -27,15 +27,7 @@ def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, t_initialize, 
         #of M.  We make the value of M and the bounds of the big M constraint larger
         #in this case, but this may still be more efficient by allowing t_0i = 0.
 
-        
-        #MOD4 Determine K
-        K = []
-        for i in range(0, Q.shape[0]):
-            K.append(max(Q['a_i'][i], end - Q['b_i'][i]))
-        K = max(K)
-        
-        K =  [max(max(Q['a_i'][i], end - Q['b_i'][i]) for i in range(0, Q.shape[0]))]
-        
+               
         #Setup vertices and nodes based on requests and Q
         vertices = [i 
                     for i in range(0, len(Q)+1)]
@@ -54,7 +46,7 @@ def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, t_initialize, 
         M_inst = []
         for i in range(0, len(Q)):
             for j in range(0, len(Q)):
-                 M_ij = min(end, Q['b_i'][i] + flex + Q['s_i'][i] + buffer) - max(start, Q['a_i'][j] - flex)
+                 M_ij = min(end, Q['b_i'].iloc[i] + flex + Q['s_i'].iloc[i] + buffer) - max(start, Q['a_i'].iloc[j] - flex)
                  M_inst.append(M_ij)
                 
             M_df[i] = M_inst
@@ -107,7 +99,7 @@ def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, t_initialize, 
         #               for i in range(0, len(Q)) 
         #               for j in range(0, len(Q)) if j != i)
         
-        m.addConstrs( (t_i[j]/scale) >= ((t_i[i] + Q['s_i'][i] + buffer - ((1 - x_i_j[i+1, j+1])*M_df.iloc[i, j]))/scale) #go back to *M if going with the generic original M and not M_ij
+        m.addConstrs( (t_i[j]/scale) >= ((t_i[i] + Q['s_i'].iloc[i] + buffer - ((1 - x_i_j[i+1, j+1])*M_df.iloc[i, j]))/scale) #go back to *M if going with the generic original M and not M_ij
                       for i in range(0, len(Q)) 
                       for j in range(0, len(Q)) if j != i)
         
@@ -117,7 +109,7 @@ def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, t_initialize, 
         #m.addConstrs(t_i[i] <= Q['b_i'][i] for i in t_i)
         
         # scenario time window (7)
-        m.addConstrs( ((t_i[i] + Q['s_i'][i] + buffer)/scale) <= (end/scale) for i in t_i )
+        m.addConstrs( ((t_i[i] + Q['s_i'].iloc[i] + buffer)/scale) <= (end/scale) for i in t_i )
         m.addConstrs( (t_i[i]/scale) >= 0 for i in t_i)
         
         #Earliness/Tardiness Constraints for MOD4b (24, 25)
@@ -128,9 +120,9 @@ def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, t_initialize, 
         for i in t_i:
             #t_0i = int(round((Q['a_i'][i] + Q['b_i'][i]) / 2))
             #t_0i = 0 #t_start
-            t_0i = Q['a_i'][i]#/np.mean(Q['a_i'])
-            m.addConstr( (t_i[i]/scale) >= (Q['a_i'][i] - flex - ((1-x_i_j.sum(i+1, '*'))*(Q['a_i'][i] - flex - t_0i)) )/scale)
-            m.addConstr( (t_i[i]/scale) <= (Q['b_i'][i] + flex + ((1-x_i_j.sum(i+1, '*'))*(t_0i - Q['b_i'][i] - flex)) )/scale)
+            t_0i = Q['a_i'].iloc[i]#/np.mean(Q['a_i'])
+            m.addConstr( (t_i[i]/scale) >= (Q['a_i'].iloc[i] - flex - ((1-x_i_j.sum(i+1, '*'))*(Q['a_i'].iloc[i] - flex - t_0i)) )/scale)
+            m.addConstr( (t_i[i]/scale) <= (Q['b_i'].iloc[i] + flex + ((1-x_i_j.sum(i+1, '*'))*(t_0i - Q['b_i'].iloc[i] - flex)) )/scale)
         
         #new constraint to prevent schedule trucks from being scheduled after 720 minutes
         #if the vehicle is cancelled then this constraint is met and not applicable
@@ -151,7 +143,7 @@ def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, t_initialize, 
         
         obj = gp.LinExpr()
         for i in range(0, len(Q)):
-            obj += (1-x_i_j.sum(i+1, '*'))*(Q['s_i'][i]/scale_s_i) #double parking objective function
+            obj += (1-x_i_j.sum(i+1, '*'))*(Q['s_i'].iloc[i]/scale_s_i) #double parking objective function
             #obj += b_i[i] #cruising objective function
 
         
@@ -297,16 +289,16 @@ def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, t_initialize, 
             park_data = []
             #double parked delivery vehicles
             if np.round((1-x_i_j.sum(i+1, '*')).getValue()) == 1:
-                park_data.append(Q['Trucks'][i])
-                park_data.append(Q['a_i'][i])
-                park_data.append(Q['s_i'][i])
-                park_data.append(Q['d_i'][i])
+                park_data.append(Q['Trucks'].iloc[i])
+                park_data.append(Q['a_i'].iloc[i])
+                park_data.append(Q['s_i'].iloc[i])
+                park_data.append(Q['d_i'].iloc[i])
                 park_data.append('Dbl Park')
             elif np.round((1-x_i_j.sum(i+1, '*')).getValue()) == 0: #legally parked delivery vehicles
-                park_data.append(Q['Trucks'][i])
+                park_data.append(Q['Trucks'].iloc[i])
                 park_data.append(np.round(t_i[i].getAttr("x")))
-                park_data.append(Q['s_i'][i])
-                park_data.append(np.round(t_i[i].getAttr("x")) + Q['s_i'][i])
+                park_data.append(Q['s_i'].iloc[i])
+                park_data.append(np.round(t_i[i].getAttr("x")) + Q['s_i'].iloc[i])
                 park_data.append('Legal Park')
                 
             park_events.loc[len(park_events.index)] = park_data

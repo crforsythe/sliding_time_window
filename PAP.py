@@ -5,7 +5,7 @@ Created on Sun Mar  7 09:12:21 2021
 @author: Burns
 """
 
-def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, t_initialize, x_initialize):
+def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, end_scenario, t_initialize, x_initialize):
     
     try:
         #added variables to help scale the constraints in the optimization algorithm
@@ -46,7 +46,7 @@ def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, t_initialize, 
         M_inst = []
         for i in range(0, len(Q)):
             for j in range(0, len(Q)):
-                 M_ij = min(end, Q['b_i'].iloc[i] + flex + Q['s_i'].iloc[i] + buffer) - max(start, Q['a_i'].iloc[j] - flex)
+                 M_ij = min(end_scenario, Q['b_i'].iloc[i] + flex + Q['s_i'].iloc[i] + buffer) - max(start, Q['a_i'].iloc[j] - flex)
                  M_inst.append(M_ij)
                 
             M_df[i] = M_inst
@@ -54,7 +54,7 @@ def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, t_initialize, 
         
         M_df = M_df.transpose()
         
-        
+        #M = max(Q['b_i']) + max(Q['s_i']) - min(Q['a_i'])
               
         #-----------------------------------------------------------------------------
         # Create optimization model
@@ -99,7 +99,7 @@ def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, t_initialize, 
         #               for i in range(0, len(Q)) 
         #               for j in range(0, len(Q)) if j != i)
         
-        m.addConstrs( (t_i[j]/scale) >= ((t_i[i] + Q['s_i'].iloc[i] + buffer - ((1 - x_i_j[i+1, j+1])*M_df.iloc[i, j]))/scale) #go back to *M if going with the generic original M and not M_ij
+        m.addConstrs( (t_i[j]/scale) >= ((t_i[i] + Q['s_i'].iloc[i] + buffer - ((1 - x_i_j[i+1, j+1])*M_df.iloc[i, j]))/scale) #go back to *M if going with the generic original M and not M_ij, M_df.iloc[i, j]
                       for i in range(0, len(Q)) 
                       for j in range(0, len(Q)) if j != i)
         
@@ -109,8 +109,9 @@ def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, t_initialize, 
         #m.addConstrs(t_i[i] <= Q['b_i'][i] for i in t_i)
         
         # scenario time window (7)
-        m.addConstrs( ((t_i[i] + Q['s_i'].iloc[i] + buffer)/scale) <= (end/scale) for i in t_i )
-        m.addConstrs( (t_i[i]/scale) >= 0 for i in t_i)
+        m.addConstrs( ((t_i[i] + Q['s_i'].iloc[i] + buffer)/scale) <= (end_scenario/scale) for i in t_i )
+        m.addConstrs( (t_i[i]/scale) >= (start/scale) for i in t_i)
+        m.addConstrs( (t_i[i]/scale) <= (end/scale) for i in t_i)
         
         #Earliness/Tardiness Constraints for MOD4b (24, 25)
         #m.addConstrs(K[0]*b_i[i] >= Q['a_i'][i] - t_i[i] - flex for i in b_i)
@@ -191,17 +192,17 @@ def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, t_initialize, 
         
         #-----------------------------------------------------------------------------
         #Set initial conditions from First Come First Serve solution
-        if (flex != 5): #added, switch from 0 to 5
-            for item in t_i:
-                #print(Q['t_i'][i])
-                #t_i[i].start = Q['t_i'][i]
-                t_i[item].start = t_initialize[item]
+        # if (flex != 5): #added, switch from 0 to 5
+        #     for item in t_i:
+        #         #print(Q['t_i'][i])
+        #         #t_i[i].start = Q['t_i'][i]
+        #         t_i[item].start = t_initialize[item]
             
-        if (flex != 5): #added, switch from 0 to 5 (0 originally)
-            i = 0
-            for item in x_i_j:
-                x_i_j[item].start = x_initialize[i]
-                i += 1
+        # if (flex != 5): #added, switch from 0 to 5 (0 originally)
+        #     i = 0
+        #     for item in x_i_j:
+        #         x_i_j[item].start = x_initialize[i]
+        #         i += 1
         
         #for i in range(0, len(cancelled)):
             #print(cancelled[i])
@@ -251,7 +252,7 @@ def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, t_initialize, 
             #the total service time to time double parked
             for i in t_i:
                 if (1-x_i_j.sum(i+1, '*')).getValue() == 1:
-                    flex_dbl_park += Q['s_i'][i]
+                    flex_dbl_park += Q['s_i'].iloc[i]
 
            
             for i in x_i_j:
@@ -275,10 +276,10 @@ def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, t_initialize, 
         for i in t_i:
             dbl_parked_data = []
             if (1-x_i_j.sum(i+1, '*')).getValue() == 1:
-                dbl_parked_data.append(Q["Trucks"][i])
-                dbl_parked_data.append(Q['a_i'][i])
-                dbl_parked_data.append(Q['s_i'][i])
-                dbl_parked_data.append(Q['d_i'][i])
+                dbl_parked_data.append(Q["Trucks"].iloc[i])
+                dbl_parked_data.append(Q['a_i'].iloc[i])
+                dbl_parked_data.append(Q['s_i'].iloc[i])
+                dbl_parked_data.append(Q['d_i'].iloc[i])
             
                 dbl_park_events.loc[len(dbl_park_events.index)] = dbl_parked_data
 

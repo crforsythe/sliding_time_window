@@ -5,7 +5,7 @@ Created on Sun Mar  7 09:12:21 2021
 @author: Burns
 """
 
-def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, end_scenario, t_initialize, x_initialize):
+def MOD_flex(num_trucks, num_spaces, Q, buffer, start, end, end_scenario, t_initialize, x_initialize):
     
     try:
         #added variables to help scale the constraints in the optimization algorithm
@@ -46,7 +46,7 @@ def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, end_scenario, 
         M_inst = []
         for i in range(0, len(Q)):
             for j in range(0, len(Q)):
-                 M_ij = min(end_scenario, Q['b_i'].iloc[i] + flex + Q['s_i'].iloc[i] + buffer) - max(start, Q['a_i'].iloc[j] - flex)
+                 M_ij = min(end_scenario, Q['b_i'].iloc[i] + Q['phi'].iloc[i] + Q['s_i'].iloc[i] + buffer) - max(start, Q['a_i'].iloc[j] - Q['phi'].iloc[j])
                  M_inst.append(M_ij)
                 
             M_df[i] = M_inst
@@ -122,8 +122,8 @@ def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, end_scenario, 
             #t_0i = int(round((Q['a_i'][i] + Q['b_i'][i]) / 2))
             #t_0i = 0 #t_start
             t_0i = Q['a_i'].iloc[i]#/np.mean(Q['a_i'])
-            m.addConstr( (t_i[i]/scale) >= (Q['a_i'].iloc[i] - flex - ((1-x_i_j.sum(i+1, '*'))*(Q['a_i'].iloc[i] - flex - t_0i)) )/scale)
-            m.addConstr( (t_i[i]/scale) <= (Q['b_i'].iloc[i] + flex + ((1-x_i_j.sum(i+1, '*'))*(t_0i - Q['b_i'].iloc[i] - flex)) )/scale)
+            m.addConstr( (t_i[i]/scale) >= (Q['a_i'].iloc[i] - Q['phi'].iloc[i] - ((1-x_i_j.sum(i+1, '*'))*(Q['a_i'].iloc[i] - Q['phi'].iloc[i] - t_0i)) )/scale)
+            m.addConstr( (t_i[i]/scale) <= (Q['b_i'].iloc[i] + Q['phi'].iloc[i] + ((1-x_i_j.sum(i+1, '*'))*(t_0i - Q['b_i'].iloc[i] - Q['phi'].iloc[i])) )/scale)
         
         #new constraint to prevent schedule trucks from being scheduled after 720 minutes
         #if the vehicle is cancelled then this constraint is met and not applicable
@@ -271,12 +271,12 @@ def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, end_scenario, 
 
         #store data on the double parked vehicles, e.g. when did they start double
         #parking and for how long
-        dbl_park_events = pd.DataFrame(columns = ["Truck", "a_i", "s_i", "d_i"])
+        dbl_park_events = pd.DataFrame(columns = ["Vehicle", "a_i", "s_i", "d_i"])
         
         for i in t_i:
             dbl_parked_data = []
             if (1-x_i_j.sum(i+1, '*')).getValue() == 1:
-                dbl_parked_data.append(Q["Trucks"].iloc[i])
+                dbl_parked_data.append(Q['Vehicle'].iloc[i])
                 dbl_parked_data.append(Q['a_i'].iloc[i])
                 dbl_parked_data.append(Q['s_i'].iloc[i])
                 dbl_parked_data.append(Q['d_i'].iloc[i])
@@ -284,19 +284,19 @@ def MOD_flex(flex, num_trucks, num_spaces, Q, buffer, start, end, end_scenario, 
                 dbl_park_events.loc[len(dbl_park_events.index)] = dbl_parked_data
 
         #store data on all of the vehicles, legally parked and double parked
-        park_events = pd.DataFrame(columns = ['Truck', 'a_i', 's_i', 'd_i', 'Park Type'])
+        park_events = pd.DataFrame(columns = ['Vehicle', 'a_i', 's_i', 'd_i', 'Park Type'])
         for i in t_i:
             #print(i)
             park_data = []
             #double parked delivery vehicles
             if np.round((1-x_i_j.sum(i+1, '*')).getValue()) == 1:
-                park_data.append(Q['Trucks'].iloc[i])
+                park_data.append(Q['Vehicle'].iloc[i])
                 park_data.append(Q['a_i'].iloc[i])
                 park_data.append(Q['s_i'].iloc[i])
                 park_data.append(Q['d_i'].iloc[i])
-                park_data.append('Dbl Park')
+                park_data.append('No Park')
             elif np.round((1-x_i_j.sum(i+1, '*')).getValue()) == 0: #legally parked delivery vehicles
-                park_data.append(Q['Trucks'].iloc[i])
+                park_data.append(Q['Vehicle'].iloc[i])
                 park_data.append(np.round(t_i[i].getAttr("x")))
                 park_data.append(Q['s_i'].iloc[i])
                 park_data.append(np.round(t_i[i].getAttr("x")) + Q['s_i'].iloc[i])

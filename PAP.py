@@ -46,8 +46,8 @@ def MOD_flex(num_trucks, num_spaces, Q, buffer, start, end, end_scenario, t_init
         M_inst = []
         for i in range(0, len(Q)):
             for j in range(0, len(Q)):
-                 M_ij = min(end_scenario, Q['b_i'].iloc[i] + Q['phi'].iloc[i] + Q['s_i'].iloc[i] + buffer) - max(start, Q['a_i'].iloc[j] - Q['phi'].iloc[j])
-                 M_inst.append(M_ij)
+                  M_ij = min(end_scenario, Q['b_i'].iloc[i] + Q['phi'].iloc[i] + Q['s_i'].iloc[i] + buffer) - max(start, Q['a_i'].iloc[j] - Q['phi'].iloc[j])
+                  M_inst.append(M_ij)
                 
             M_df[i] = M_inst
             M_inst = []
@@ -87,8 +87,14 @@ def MOD_flex(num_trucks, num_spaces, Q, buffer, start, end, end_scenario, t_init
                       for i in range(0, len(Q)))
         
         # Requests should either be allocated or not allocated to a parking space
-        m.addConstrs(x_i_j.sum(i+1, '*') <= 1 
-              for i in range(0, len(Q)))
+        for i in range(0, len(Q)):
+            if Q.iloc[i]['Prev Assigned'] != 'Yes': #e.g. could be 'No' or nan
+                m.addConstr(x_i_j.sum(i+1, '*') <= 1)
+            elif Q.iloc[i]['Prev Assigned'] == 'Yes':
+                m.addConstr(x_i_j.sum(i+1, '*') == 1)
+                
+        # m.addConstrs(x_i_j.sum(i+1, '*') <= 1 
+        #       for i in range(0, len(Q)))
         # + b_i[i] 
         
         # Relate time and service time to flow (5)
@@ -121,7 +127,12 @@ def MOD_flex(num_trucks, num_spaces, Q, buffer, start, end, end_scenario, t_init
         for i in t_i:
             #t_0i = int(round((Q['a_i'][i] + Q['b_i'][i]) / 2))
             #t_0i = 0 #t_start
-            t_0i = Q['a_i'].iloc[i]#/np.mean(Q['a_i'])
+            #t_0i = Q['a_i'].iloc[i]#/np.mean(Q['a_i']) #first paper version
+            if Q['a_i'].iloc[i] < start: #can have a conflict where we are considering a_i that occurred before the start of this window 
+                t_0i = start
+            elif Q['a_i'].iloc[i] >= start:
+                t_0i = Q['a_i'].iloc[i]
+                
             m.addConstr( (t_i[i]/scale) >= (Q['a_i'].iloc[i] - Q['phi'].iloc[i] - ((1-x_i_j.sum(i+1, '*'))*(Q['a_i'].iloc[i] - Q['phi'].iloc[i] - t_0i)) )/scale)
             m.addConstr( (t_i[i]/scale) <= (Q['b_i'].iloc[i] + Q['phi'].iloc[i] + ((1-x_i_j.sum(i+1, '*'))*(t_0i - Q['b_i'].iloc[i] - Q['phi'].iloc[i])) )/scale)
         

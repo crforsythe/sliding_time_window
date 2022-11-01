@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import time
 import PAP as MOD_flex
+import seq_arrival_new as seq_curb
 
 
 
@@ -18,7 +19,7 @@ import PAP as MOD_flex
 start = 0
 end_scenario = 60
 #number of parking spaces
-c = 1
+c = 2
 #number of vehicles arriving at the curbspace
 n = 100
 #number of iterations
@@ -26,14 +27,14 @@ i = 10
 #buffer in the optimal schedule
 buffer = 0
 #generic schedule flexibility
-#phi = 5
+phi = 5
 
 
 # for testing, setup the truth vehicle request matrix
 vehicle_label = ['Veh1', 'Veh2', 'Veh3', 'Veh4', 'Veh5', 'Veh6', 'Veh7', 'Veh8', 'Veh9', 'Veh10']
 recieved = [1, 2, 3, 7, 8, 8, 9, 10, 11, 13]
 a_i_OG = [3, 7, 9, 12, 9, 22, 20, 12, 16, 13]
-s_i = [6, 13, 10, 3, 4, 2, 7, 5, 4, 3]
+s_i = [5, 13, 10, 3, 4, 2, 7, 5, 4, 3]
 d_i_OG = [8, 20, 19, 15, 13, 24, 27, 17, 20, 16]
 phi = [5, 5, 5, 5, 5, 5, 5, 5, 5, 5]
 
@@ -41,7 +42,7 @@ req_truth = pd.DataFrame(list(zip(vehicle_label, recieved, a_i_OG, s_i, d_i_OG, 
                          columns = ['Vehicle','Received', 'a_i_OG', 's_i', 'd_i_OG', 'phi'])
 
 #length of time to collect parking requests
-zeta = 5
+zeta = 2
 #length of time to schedule requests in the future
 tau = 10
 
@@ -67,14 +68,31 @@ while current_time <= end_scenario:
     req_master.reset_index(inplace = True, drop = True)
     
     #identify the incoming requests within the optimization time window under consideration, tau.  Can include request with
-    #a_i_OG before current_time as long as phi allows the request to be scheduled within current_time + tau
-    req_incoming_tau = req_incoming.loc[np.where(
-                                                 ((req_incoming['a_i_OG'] >= current_time) & #request is greater than current time
-                                                  (req_incoming['a_i_OG'] + req_incoming['phi'] < current_time + tau)) #but request arrival + flex is less than current time + tau
+    #a_i_OG before current_time as long as phi allows the request to be scheduled within current_time + tau.
+    #The 'isna' check allows for incoming requests that were originally outside of current_time + tau to come back later in another
+    #future time window.  They aren't "new" incoming per se, but they are old incoming requests that have not yet been processed
+    #or considered in an optimal schedule.
+    req_incoming_tau = req_master.loc[np.where(
+                                                    ((req_master['Assigned'].isna() == True) & #this request is nan, not 'No' or 'Yes' to being assigned, e.g. this request has never been input to the optimization framework                           
+                                                     (req_master['a_i_OG'] >= current_time) & #request is greater than current time
+                                                     (req_master['a_i_OG'] + req_master['phi'] < current_time + tau)) #but request arrival + flex is less than current time + tau
                                                  |                                                                  #OR
-                                                 ((req_incoming['a_i_OG'] + req_incoming['phi'] >= current_time) & #requested arrival + flex is greater than current time
-                                                  (req_incoming['a_i_OG'] + req_incoming['phi'] < current_time + tau)) #but requested arrival + flex is less than current time + tau
+                                                     ((req_master['Assigned'].isna() == True) & #this request is nan, not 'No' or 'Yes' to being assigned, e.g. this request has never been input to the optimization framework       
+                                                      (req_master['a_i_OG'] + req_master['phi'] >= current_time) & #requested arrival + flex is greater than current time
+                                                      (req_master['a_i_OG'] + req_master['phi'] < current_time + tau)) #but requested arrival + flex is less than current time + tau
                                                  )]
+    #req_incoming_tau['Assigned'] = 'No'
+    
+    # #identify previously received, but not yet processed requests, e.g. a request sent in well in advance of a_i_OG
+    # req_old_nan_tau = req_master.loc[np.where(
+    #                                             ((req_master['Assigned'].isna() == True) &
+    #                                             (req_master['a_i_OG'] >= current_time) & #request is greater than current time
+    #                                             (req_master['a_i_OG'] + req_master['phi'] < current_time + tau)) #but request arrival + flex is less than current time + tau
+    #                                             |
+    #                                             ((req_master['Assigned'].isna() == True) &
+    #                                             (req_master['a_i_OG'] + req_master['phi'] >= current_time) & #requested arrival + flex is greater than current time
+    #                                             (req_master['a_i_OG'] + req_master['phi'] < current_time + tau)) #but requested arrival + flex is less than current time + tau
+    #                                             )]
     
     #identify any old and not assigned vehicles which might still be relevant in the current time window
     req_old_no_tau = req_master.loc[np.where(
@@ -114,14 +132,15 @@ while current_time <= end_scenario:
     #combine these previous events that are held over in a new matrix which will be input for the unique requirements to the PAP
     
     #combine and convert the set of requests between current time and += tau to go into the PAP
-    Q = pd.DataFrame(columns = ['Vehicle','a_i', 'b_i', 's_i', 't_i', 'd_i', 'phi'])
+    Q = pd.DataFrame(columns = ['Vehicle','a_i', 'b_i', 's_i', 't_i', 'd_i', 'phi', 'Prev Assigned'])
     Q['Vehicle'] = pd.concat([req_incoming_tau['Vehicle'], req_old_no_tau['Vehicle'], req_old_yes_tau['Vehicle'], req_old_yes_future_tau['Vehicle']])
     Q['a_i'] = pd.concat([req_incoming_tau['a_i_OG'], req_old_no_tau['a_i_OG'], req_old_yes_tau['a_i_OG'], req_old_yes_future_tau['a_i_OG']])   
     Q['b_i'] = pd.concat([req_incoming_tau['a_i_OG'], req_old_no_tau['a_i_OG'], req_old_yes_tau['a_i_OG'], req_old_yes_future_tau['a_i_OG']])   
     Q['s_i'] = pd.concat([req_incoming_tau['s_i'], req_old_no_tau['s_i'], req_old_yes_tau['s_i'], req_old_yes_future_tau['s_i']])  
-    Q['t_i'] = pd.concat([req_incoming_tau['d_i_OG'], req_old_no_tau['d_i_OG'], req_old_yes_tau['d_i_OG'], req_old_yes_future_tau['d_i_OG']])  
+    Q['t_i'] = pd.concat([req_incoming_tau['a_i_OG'], req_old_no_tau['a_i_OG'], req_old_yes_tau['a_i_OG'], req_old_yes_future_tau['a_i_OG']])  
     Q['d_i'] = pd.concat([req_incoming_tau['d_i_OG'], req_old_no_tau['d_i_OG'], req_old_yes_tau['d_i_OG'], req_old_yes_future_tau['d_i_OG']])   
     Q['phi'] = pd.concat([req_incoming_tau['phi'], req_old_no_tau['phi'], req_old_yes_tau['phi'], req_old_yes_future_tau['phi']])
+    Q['Prev Assigned'] = pd.concat([req_incoming_tau['Assigned'], req_old_no_tau['Assigned'], req_old_yes_tau['Assigned'], req_old_yes_future_tau['Assigned']])
     Q.reset_index(inplace = True, drop = True)
     
     n_tau = len(Q)
@@ -129,9 +148,10 @@ while current_time <= end_scenario:
     x_initialize = None
     
     #run the PAP
-    status, obj, count_b_i, end_state_t_i, end_state_x_ij, dbl_park_events, park_events \
-        = MOD_flex.MOD_flex(n_tau, c, Q, buffer, current_time, current_time+tau, end_scenario, t_initialize, x_initialize)
-    
+    if Q.empty == False:
+        status, obj, count_b_i, end_state_t_i, end_state_x_ij, dbl_park_events, park_events \
+            = MOD_flex.MOD_flex(n_tau, c, Q, buffer, current_time, current_time+tau, end_scenario, t_initialize, x_initialize)
+        
     
     #step through the legally parked vehicles and record the information back to the master requests dataframe
     #likely do not need to step through the dbl parked vehicle because they will be continually reshuffled and possibly added in the future
@@ -141,21 +161,49 @@ while current_time <= end_scenario:
         #what is the index of the current vehicle in the master requests dataframe?
         idx = req_master[req_master['Vehicle'] == current_veh].index.values[0]
         #record the values from the optimal solution in the master request dataframe
-        if park_events.iloc[item]['Park Type'] == 'Legal Park':
-            req_master.iloc[idx]['Assigned'] = 'Yes'
-            req_master.iloc[idx]['a_i'] = park_events.iloc[item]['a_i']
-            req_master.iloc[idx]['d_i'] = park_events.iloc[item]['d_i']
-        elif park_events.iloc[item]['Park Type'] == 'No Park':
-            req_master.iloc[idx]['Assigned'] = 'No'
+        #however, first check to see if this vehicle has been assigned a start time or not (one option: np.isnan(req_master.iloc[2]['a_i']))
+        if req_master.iloc[idx]['Assigned'] != 'Yes':
+            if park_events.iloc[item]['Park Type'] == 'Legal Park':
+                req_master.iloc[idx]['Assigned'] = 'Yes'
+                req_master.iloc[idx]['a_i'] = park_events.iloc[item]['a_i']
+                req_master.iloc[idx]['d_i'] = park_events.iloc[item]['d_i']
+            elif park_events.iloc[item]['Park Type'] == 'No Park':
+                req_master.iloc[idx]['Assigned'] = 'No'
 
 
+#FCFS
+Q_FCFS = pd.DataFrame(columns = ['Vehicle','a_i', 'b_i', 's_i', 't_i', 'd_i', 'phi', 'Prev Assigned'])
+Q_FCFS['Vehicle'] = req_master['Vehicle']
+Q_FCFS['a_i'] = req_master['a_i_OG']
+Q_FCFS['b_i'] = req_master['a_i_OG']
+Q_FCFS['s_i'] = req_master['s_i']
+Q_FCFS['t_i'] = req_master['a_i_OG']
+Q_FCFS['d_i'] = req_master['d_i_OG']
+Q_FCFS['phi'] = phi
+Q_FCFS['Prev Assigned'] = 'nan'
+
+dbl_park_seq, dbl_parked_events, legal_parked_events, park_events_FCFS = seq_curb.seq_curb(c, Q_FCFS, end_scenario)
 
 
+#Optimal PAP
+n = len(Q_FCFS)
+status, obj, count_b_i, end_state_t_i, end_state_x_ij, dbl_park_events, park_events \
+    = MOD_flex.MOD_flex(n, c, Q_FCFS, buffer, start, end_scenario, end_scenario, t_initialize, x_initialize)
 
 
+print('\nSliding Time Window Metrics:')
+print('zeta = ' + str(zeta) + ', tau = ' + str(tau))
+print('Total s_i = ' + str(np.sum(req_master['s_i'])))
+print('Legal Park = ' + str(np.sum(req_master[req_master['Assigned'] == 'Yes']['s_i'])))
+print('Not Assigned = ' + str(np.sum(req_master[req_master['Assigned'] == 'No']['s_i'])))
 
+print('\nFCFS Metrics:')
+print('Legal Park = ' + str(np.sum(park_events_FCFS[park_events_FCFS['Park Type'] == 'Legal Park']['s_i'])))
+print('Not Assigned = ' + str(np.sum(park_events_FCFS[park_events_FCFS['Park Type'] == 'Dbl Park']['s_i'])))
 
-
+print('\nOptimal Metrics:')
+print('Legal Park = ' + str(np.sum(park_events[park_events['Park Type'] == 'Legal Park']['s_i'])))
+print('Not Assigned = ' + str(np.sum(park_events[park_events['Park Type'] == 'Dbl Park']['s_i'])))
 
 
 

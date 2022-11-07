@@ -91,7 +91,10 @@ def MOD_flex(num_trucks, num_spaces, Q, buffer, start, end, end_scenario, t_init
             if Q.iloc[i]['Prev Assigned'] != 'Yes': #e.g. could be 'No' or nan
                 m.addConstr(x_i_j.sum(i+1, '*') <= 1)
             elif Q.iloc[i]['Prev Assigned'] == 'Yes':
-                m.addConstr(x_i_j.sum(i+1, '*') == 1)
+                if Q.iloc[i]['a_i'] == start: #is this vehicle a hold over from the prev optimization window, then make sure to start a parking sequence with this vehicle
+                    m.addConstr(x_i_j[0,i+1] == 1)
+                else: #this vehicle is prev scheduled, but not starting until after the start of the window, or was not a hold over from a prev optimization
+                    m.addConstr(x_i_j.sum(i+1, '*') == 1)
                 
         # m.addConstrs(x_i_j.sum(i+1, '*') <= 1 
         #       for i in range(0, len(Q)))

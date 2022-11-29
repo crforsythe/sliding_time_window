@@ -11,15 +11,20 @@ import pandas as pd
 import time
 import PAP as MOD_flex
 import seq_arrival_new as seq_curb
+import gen_Pitt_arrivals as gen_Pitt
 
 tic = time.time()
+
+
+# Variable initialization
+np.random.seed(335)
 
 #set the scenario parameters
 #start and end time
 start = 0
-end_scenario = 60
+end_scenario = 1200
 #number of parking spaces
-c = 4
+c = 50
 #number of vehicles arriving at the curbspace
 n = 100
 #number of iterations
@@ -28,27 +33,59 @@ i = 10
 buffer = 0
 #generic schedule flexibility
 phi = 5
+#flexibility as a ratio of s_i
+phi_s_i_ratio = 0.1
+#length of time to collect parking requests
+zeta = 1
+#length of time to schedule requests in the future
+tau = 30
+#max hourly average demand per parking space
+max_hr_demand_per_space = 6
+
 
 
 # for testing, setup the truth vehicle request matrix
 #vehicle_label = ['Veh1', 'Veh2', 'Veh3', 'Veh4', 'Veh5', 'Veh6', 'Veh7', 'Veh8', 'Veh9', 'Veh10']
 vehicle_label = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 recieved = [1, 2, 3, 7, 8, 8, 9, 10, 11, 13]
-a_i_OG = [3, 7, 9, 12, 9, 22, 20, 12, 16, 13]
+a_i_OG = [3, 7, 9, 11, 9, 22, 20, 12, 16, 13]
 s_i = [5, 13, 10, 3, 4, 2, 7, 5, 4, 3]
 d_i_OG = [8, 20, 19, 15, 13, 24, 27, 17, 20, 16]
 phi = [5, 5, 5, 5, 5, 5, 5, 5, 5, 5]
-
+int
 req_truth = pd.DataFrame(list(zip(vehicle_label, recieved, a_i_OG, s_i, d_i_OG, phi)),
                          columns = ['Vehicle','Received', 'a_i_OG', 's_i', 'd_i_OG', 'phi'])
 
-#length of time to collect parking requests
-zeta = 1
-#length of time to schedule requests in the future
-tau = 30
+
+
+#what is the lower and upper bound of the number of DVs, which is dependent on the number of parking spaces
+lower_DVs = 1 #this is the lowest possible number of DVs to experience over the day, could go higher, but engineering judgement
+upper_DVs = max_hr_demand_per_space*20*c #we want 6 veh/hr*11hr scenario window*the number of parking spaces #added
+
+#draw a random integer between the upper and lower number of DVs to expect
+n = np.random.randint(lower_DVs, upper_DVs +1) #+1 becuase it is exclusive of the upper value
+
+n_norm = n / 20 / c #variable available for storage
+
+
+#generate a random set of vehicle arrival requests based on the number of
+#delivery vehicles in the scenario
+
+Q, sum_service = gen_Pitt.gen_Pitt_arrivals(n, end_scenario)
+    
 
 
 
+req_truth = pd.DataFrame(columns = ['Vehicle','Received', 'a_i_OG', 's_i', 'd_i_OG', 'phi'])
+req_truth['a_i_OG'] = Q['a_i']
+req_truth['s_i'] = Q['s_i']
+req_truth['d_i_OG'] = Q['d_i']
+req_truth['phi'] = np.round(req_truth['s_i'] * phi_s_i_ratio)
+#randomly generate a time prior to a_i_OG to represent when the vehicle parking request was received
+delta = np.random.lognormal(2, 1, len(Q))
+req_truth['Received'] = Q['a_i'] - delta
+req_truth['Vehicle'] = range(1, len(Q) + 1)
+req_truth.reset_index(drop = True, inplace = True)
 
 #for z in range(1, 10):
     #for t in range(1, 10):
@@ -174,12 +211,18 @@ while current_time < end_scenario:
             #however, first check to see if this vehicle has been assigned a start time or not (one option: np.isnan(req_master.iloc[2]['a_i']))
             if req_master.iloc[idx]['Assigned'] != 'Yes':
                 if park_events.iloc[item]['Park Type'] == 'Legal Park':
-                    req_master.iloc[idx]['Assigned'] = 'Yes'
-                    req_master.iloc[idx]['a_i'] = park_events.iloc[item]['a_i']
-                    req_master.iloc[idx]['d_i'] = park_events.iloc[item]['d_i']
+                    req_master.loc[idx, 'Assigned'] = 'Yes'
+                    req_master.loc[idx, 'a_i'] = park_events.iloc[item]['a_i']
+                    req_master.loc[idx, 'd_i'] = park_events.iloc[item]['d_i']
                 elif park_events.iloc[item]['Park Type'] == 'No Park':
-                    req_master.iloc[idx]['Assigned'] = 'No'
+                    req_master.loc[idx, 'Assigned'] = 'No'
 
+
+toc = time.time()
+runtime_sliding = toc-tic
+
+
+tic = time.time()
 
 #FCFS
 Q_FCFS = pd.DataFrame(columns = ['Vehicle','a_i', 'b_i', 's_i', 't_i', 'd_i', 'phi', 'Prev Assigned'])
@@ -189,17 +232,23 @@ Q_FCFS['b_i'] = req_master['a_i_OG']
 Q_FCFS['s_i'] = req_master['s_i']
 Q_FCFS['t_i'] = req_master['a_i_OG']
 Q_FCFS['d_i'] = req_master['d_i_OG']
-Q_FCFS['phi'] = phi
+Q_FCFS['phi'] = req_master['phi']
 Q_FCFS['Prev Assigned'] = 'nan'
 
 dbl_park_seq, dbl_parked_events, legal_parked_events, park_events_FCFS = seq_curb.seq_curb(c, Q_FCFS, end_scenario)
 
+toc = time.time()
+runtime_FCFS = toc-tic
 
-#Optimal PAP
-n = len(Q_FCFS)
-status, obj, count_b_i, end_state_t_i, end_state_x_ij, dbl_park_events, park_events \
-    = MOD_flex.MOD_flex(n, c, Q_FCFS, buffer, start, end_scenario, end_scenario, t_initialize, x_initialize)
 
+
+
+
+
+print('\nScenario Overview:')
+print('Number of parking spaces = ' + str(c))
+print('Number of vehicles = ' + str(n))
+print('Optimal Solution = N/A')
 
 print('\nSliding Time Window Metrics:')
 print('zeta = ' + str(zeta) + ', tau = ' + str(tau))
@@ -207,19 +256,73 @@ print('Number of Optimizations = ' + str(opt_counter))
 print('Total s_i = ' + str(np.sum(req_master['s_i'])))
 print('Legal Park = ' + str(np.sum(req_master[req_master['Assigned'] == 'Yes']['s_i'])))
 print('Not Assigned = ' + str(np.sum(req_master[req_master['Assigned'] == 'No']['s_i'])))
+print('Runtime = ' + str(runtime_sliding))
 
 print('\nFCFS Metrics:')
 print('Legal Park = ' + str(np.sum(park_events_FCFS[park_events_FCFS['Park Type'] == 'Legal Park']['s_i'])))
 print('Not Assigned = ' + str(np.sum(park_events_FCFS[park_events_FCFS['Park Type'] == 'Dbl Park']['s_i'])))
+print('Runtime = ' + str(runtime_FCFS))
 
-print('\nOptimal Metrics:')
-print('Legal Park = ' + str(np.sum(park_events[park_events['Park Type'] == 'Legal Park']['s_i'])))
-print('Not Assigned = ' + str(np.sum(park_events[park_events['Park Type'] == 'Dbl Park']['s_i'])))
 
-toc = time.time()
 
-runtime = toc-tic
-print('\nruntime: ' + str(runtime))
+# tic = time.time()
+
+# #Optimal PAP
+# n = len(Q_FCFS)
+# status, obj, count_b_i, end_state_t_i, end_state_x_ij, dbl_park_events, park_events \
+#     = MOD_flex.MOD_flex(n, c, Q_FCFS, buffer, start, end_scenario, end_scenario, t_initialize, x_initialize)
+
+# toc = time.time()
+# runtime_Opt = toc-tic
+
+
+# if status == 2: #an optimal solution was found
+    
+#     print('\nScenario Overview:')
+#     print('Number of parking spaces = ' + str(c))
+#     print('Number of vehicles = ' + str(n))
+#     print('Optimal Solution = Yes')
+
+#     print('\nSliding Time Window Metrics:')
+#     print('zeta = ' + str(zeta) + ', tau = ' + str(tau))
+#     print('Number of Optimizations = ' + str(opt_counter))
+#     print('Total s_i = ' + str(np.sum(req_master['s_i'])))
+#     print('Legal Park = ' + str(np.sum(req_master[req_master['Assigned'] == 'Yes']['s_i'])))
+#     print('Not Assigned = ' + str(np.sum(req_master[req_master['Assigned'] == 'No']['s_i'])))
+#     print('Runtime = ' + str(runtime_sliding))
+    
+#     print('\nFCFS Metrics:')
+#     print('Legal Park = ' + str(np.sum(park_events_FCFS[park_events_FCFS['Park Type'] == 'Legal Park']['s_i'])))
+#     print('Not Assigned = ' + str(np.sum(park_events_FCFS[park_events_FCFS['Park Type'] == 'Dbl Park']['s_i'])))
+#     print('Runtime = ' + str(runtime_FCFS))
+    
+#     print('\nOptimal Metrics:')
+#     print('Legal Park = ' + str(np.sum(park_events[park_events['Park Type'] == 'Legal Park']['s_i'])))
+#     print('Not Assigned = ' + str(np.sum(park_events[park_events['Park Type'] == 'Dbl Park']['s_i'])))
+#     print('Runtime = ' + str(runtime_Opt))
+    
+# elif status == 9:
+#     print('\nScenario Overview:')
+#     print('Number of parking spaces = ' + str(c))
+#     print('Number of vehicles = ' + str(n))
+#     print('Optimal Solution = No')
+
+#     print('\nSliding Time Window Metrics:')
+#     print('zeta = ' + str(zeta) + ', tau = ' + str(tau))
+#     print('Number of Optimizations = ' + str(opt_counter))
+#     print('Total s_i = ' + str(np.sum(req_master['s_i'])))
+#     print('Legal Park = ' + str(np.sum(req_master[req_master['Assigned'] == 'Yes']['s_i'])))
+#     print('Not Assigned = ' + str(np.sum(req_master[req_master['Assigned'] == 'No']['s_i'])))
+#     print('Runtime = ' + str(runtime_sliding))
+    
+#     print('\nFCFS Metrics:')
+#     print('Legal Park = ' + str(np.sum(park_events_FCFS[park_events_FCFS['Park Type'] == 'Legal Park']['s_i'])))
+#     print('Not Assigned = ' + str(np.sum(park_events_FCFS[park_events_FCFS['Park Type'] == 'Dbl Park']['s_i'])))
+#     print('Runtime = ' + str(runtime_FCFS))
+
+
+
+
 
 
 

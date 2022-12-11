@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import time
 import PAP as MOD_flex
+import PAP_min_deviation as PAP_min_deviation
 import seq_arrival_new as seq_curb
 import gen_Pitt_arrivals as gen_Pitt
 
@@ -24,7 +25,7 @@ np.random.seed(335)
 start = 0
 end_scenario = 1200
 #number of parking spaces
-c = 50
+c = 1
 #number of vehicles arriving at the curbspace
 n = 100
 #number of iterations
@@ -36,9 +37,9 @@ phi = 5
 #flexibility as a ratio of s_i
 phi_s_i_ratio = 0.1
 #length of time to collect parking requests
-zeta = 1
+zeta = 5
 #length of time to schedule requests in the future
-tau = 30
+tau = 10
 #max hourly average demand per parking space
 max_hr_demand_per_space = 6
 
@@ -56,36 +57,38 @@ int
 req_truth = pd.DataFrame(list(zip(vehicle_label, recieved, a_i_OG, s_i, d_i_OG, phi)),
                          columns = ['Vehicle','Received', 'a_i_OG', 's_i', 'd_i_OG', 'phi'])
 
+#******************************************************************************
+# Add in the Pittsburgh data
+# #what is the lower and upper bound of the number of DVs, which is dependent on the number of parking spaces
+# lower_DVs = 1 #this is the lowest possible number of DVs to experience over the day, could go higher, but engineering judgement
+# upper_DVs = max_hr_demand_per_space*20*c #we want 6 veh/hr*11hr scenario window*the number of parking spaces #added
+
+# #draw a random integer between the upper and lower number of DVs to expect
+# n = np.random.randint(lower_DVs, upper_DVs +1) #+1 becuase it is exclusive of the upper value
+
+# n_norm = n / 20 / c #variable available for storage
 
 
-#what is the lower and upper bound of the number of DVs, which is dependent on the number of parking spaces
-lower_DVs = 1 #this is the lowest possible number of DVs to experience over the day, could go higher, but engineering judgement
-upper_DVs = max_hr_demand_per_space*20*c #we want 6 veh/hr*11hr scenario window*the number of parking spaces #added
+# #generate a random set of vehicle arrival requests based on the number of
+# #delivery vehicles in the scenario
 
-#draw a random integer between the upper and lower number of DVs to expect
-n = np.random.randint(lower_DVs, upper_DVs +1) #+1 becuase it is exclusive of the upper value
-
-n_norm = n / 20 / c #variable available for storage
-
-
-#generate a random set of vehicle arrival requests based on the number of
-#delivery vehicles in the scenario
-
-Q, sum_service = gen_Pitt.gen_Pitt_arrivals(n, end_scenario)
+# Q, sum_service = gen_Pitt.gen_Pitt_arrivals(n, end_scenario)
     
 
 
 
-req_truth = pd.DataFrame(columns = ['Vehicle','Received', 'a_i_OG', 's_i', 'd_i_OG', 'phi'])
-req_truth['a_i_OG'] = Q['a_i']
-req_truth['s_i'] = Q['s_i']
-req_truth['d_i_OG'] = Q['d_i']
-req_truth['phi'] = np.round(req_truth['s_i'] * phi_s_i_ratio)
-#randomly generate a time prior to a_i_OG to represent when the vehicle parking request was received
-delta = np.random.lognormal(2, 1, len(Q))
-req_truth['Received'] = Q['a_i'] - delta
-req_truth['Vehicle'] = range(1, len(Q) + 1)
-req_truth.reset_index(drop = True, inplace = True)
+# req_truth = pd.DataFrame(columns = ['Vehicle','Received', 'a_i_OG', 's_i', 'd_i_OG', 'phi'])
+# req_truth['a_i_OG'] = Q['a_i']
+# req_truth['s_i'] = Q['s_i']
+# req_truth['d_i_OG'] = Q['d_i']
+# req_truth['phi'] = np.round(req_truth['s_i'] * phi_s_i_ratio)
+# #randomly generate a time prior to a_i_OG to represent when the vehicle parking request was received
+# delta = np.random.lognormal(2, 1, len(Q))
+# req_truth['Received'] = Q['a_i'] - delta
+# req_truth['Vehicle'] = range(1, len(Q) + 1)
+# req_truth.reset_index(drop = True, inplace = True)
+
+#******************************************************************************
 
 #for z in range(1, 10):
     #for t in range(1, 10):
@@ -199,6 +202,16 @@ while current_time < end_scenario:
         status, obj, count_b_i, end_state_t_i, end_state_x_ij, dbl_park_events, park_events \
             = MOD_flex.MOD_flex(n_tau, c, Q, buffer, current_time, current_time+tau, end_scenario, t_initialize, x_initialize)
         opt_counter += 1
+        total_min_dbl_parked_OG = obj
+        
+        #take the output from the PAP optimal solution and input into the new
+        #version of the PAP where we minimize the deviation between a_i_OG and t_i
+        #for each vehicle
+        t_initialize = end_state_t_i
+        x_initialize = end_state_x_ij
+        status, obj, count_b_i, end_state_t_i, end_state_x_ij, dbl_park_events, park_events, total_min_dbl_parked_soln \
+            = PAP_min_deviation.MOD_flex(n_tau, c, Q, buffer, current_time, current_time+tau, end_scenario, t_initialize, x_initialize, obj)
+        
     
         #step through the legally parked vehicles and record the information back to the master requests dataframe
         #likely do not need to step through the dbl parked vehicle because they will be continually reshuffled and possibly added in the future

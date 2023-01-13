@@ -82,7 +82,7 @@ def MOD_flex(num_trucks, num_spaces, Q, buffer, start, end, end_scenario, t_init
         # restricts the number of routes starting from the depot ? (2)
         m.addConstr(x_i_j.sum(0, '*') <= num_spaces)
         
-        # Flow balance (3) ??
+        # Flow balance (3)
         m.addConstrs((x_i_j.sum(i+1, '*') - x_i_j.sum('*', i+1)) == 0 
                       for i in range(0, len(Q)))
         

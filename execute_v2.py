@@ -21,7 +21,7 @@ tic = time.time()
 np.random.seed(335)
 
 #set the scenario parameters
-#start and end time
+#start and end time (minutes)
 start = 0
 end_scenario = 1200
 #number of parking spaces
@@ -163,7 +163,7 @@ while current_time < end_scenario:
     req_old_yes_tau['a_i_OG'] = current_time
     req_old_yes_tau['s_i'] = req_old_yes_tau['d_i'] - current_time
     req_old_yes_tau['d_i_OG'] = req_old_yes_tau['d_i']
-    req_old_yes_tau['phi'] = 0
+    req_old_yes_tau['phi'] = 0 #phi set to zero becuase these vehicles are already assigned a parking space and should not be shifted in the optimization
     
     #identify vehicles which have not started parking yet, but are legally assign to park in the current tau window
     req_old_yes_future_tau = req_master.loc[np.where(
@@ -176,11 +176,12 @@ while current_time < end_scenario:
     #need to edit parameters required to include these vehicle into Q, update relative to current_time
     req_old_yes_future_tau['a_i_OG'] = req_old_yes_future_tau['a_i']
     req_old_yes_future_tau['d_i_OG'] = req_old_yes_future_tau['d_i']
-    req_old_yes_future_tau['phi'] = 0
+    req_old_yes_future_tau['phi'] = 0 #phi set to zero becuase these vehicles are already assigned a parking space and should not be shifted in the optimization
     
     #combine these previous events that are held over in a new matrix which will be input for the unique requirements to the PAP
     
     #combine and convert the set of requests between current time and += tau to go into the PAP
+    #the PAP requires specific formatting of the Q matrix
     Q = pd.DataFrame(columns = ['Vehicle','a_i', 'b_i', 's_i', 't_i', 'd_i', 'phi', 'Prev Assigned'])
     Q['Vehicle'] = pd.concat([req_incoming_tau['Vehicle'], req_old_no_tau['Vehicle'], req_old_yes_tau['Vehicle'], req_old_yes_future_tau['Vehicle']])
     Q['a_i'] = pd.concat([req_incoming_tau['a_i_OG'], req_old_no_tau['a_i_OG'], req_old_yes_tau['a_i_OG'], req_old_yes_future_tau['a_i_OG']])   
@@ -198,7 +199,7 @@ while current_time < end_scenario:
     x_initialize = None
     
     #run the PAP
-    if Q.empty == False:
+    if Q.empty == False: #e.g. there are vehicle requests to consider in this time window
         status, obj, count_b_i, end_state_t_i, end_state_x_ij, dbl_park_events, park_events \
             = MOD_flex.MOD_flex(n_tau, c, Q, buffer, current_time, current_time+tau, end_scenario, t_initialize, x_initialize)
         opt_counter += 1
@@ -213,8 +214,7 @@ while current_time < end_scenario:
             = PAP_min_deviation.MOD_flex(n_tau, c, Q, buffer, current_time, current_time+tau, end_scenario, t_initialize, x_initialize, obj)
         
     
-        #step through the legally parked vehicles and record the information back to the master requests dataframe
-        #likely do not need to step through the dbl parked vehicle because they will be continually reshuffled and possibly added in the future
+        #step through the parking schedule and record the information back to the master requests dataframe
         for item in range(0, len(park_events)):
             #what is the current vehicle
             current_veh = park_events.iloc[item]['Vehicle']

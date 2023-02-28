@@ -53,7 +53,7 @@ a_i_OG = [3, 7, 9, 11, 9, 22, 20, 12, 16, 13]
 s_i = [5, 13, 10, 3, 4, 2, 7, 5, 4, 3]
 d_i_OG = [8, 20, 19, 15, 13, 24, 27, 17, 20, 16]
 phi = [5, 5, 5, 5, 5, 5, 5, 5, 5, 5]
-int
+# int
 req_truth = pd.DataFrame(list(zip(vehicle_label, recieved, a_i_OG, s_i, d_i_OG, phi)),
                          columns = ['Vehicle','Received', 'a_i_OG', 's_i', 'd_i_OG', 'phi'])
 
@@ -197,14 +197,13 @@ while current_time < end_scenario:
     n_tau = len(Q)
     t_initialize = None
     x_initialize = None
-    
+
     #run the PAP
     if Q.empty == False: #e.g. there are vehicle requests to consider in this time window
-        status, obj, count_b_i, end_state_t_i, end_state_x_ij, dbl_park_events, park_events \
-            = MOD_flex.MOD_flex(n_tau, c, Q, buffer, current_time, current_time+tau, end_scenario, t_initialize, x_initialize)
+        status, obj, count_b_i, end_state_t_i, end_state_x_ij, dbl_park_events, park_events = MOD_flex.MOD_flex(n_tau, c, Q, buffer, current_time, current_time+tau, end_scenario, t_initialize, x_initialize)
         opt_counter += 1
         total_min_dbl_parked_OG = obj
-        
+
         #take the output from the PAP optimal solution and input into the new
         #version of the PAP where we minimize the deviation between a_i_OG and t_i
         #for each vehicle
@@ -212,8 +211,8 @@ while current_time < end_scenario:
         x_initialize = end_state_x_ij
         status, obj, count_b_i, end_state_t_i, end_state_x_ij, dbl_park_events, park_events, total_min_dbl_parked_soln \
             = PAP_min_deviation.MOD_flex(n_tau, c, Q, buffer, current_time, current_time+tau, end_scenario, t_initialize, x_initialize, obj)
-        
-    
+
+
         #step through the parking schedule and record the information back to the master requests dataframe
         for item in range(0, len(park_events)):
             #what is the current vehicle

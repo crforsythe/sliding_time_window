@@ -52,7 +52,7 @@ def AP(num_trucks, end, Q, num_spaces, bids, flex, buffer, x_initialize):
     # is redudant.  The optimal solution is correct, but there might be a very small
     # increase in runtime.
     for j in range(0, end +1):
-        #print("j: " + str(j))
+        #print("jointData: " + str(jointData))
         constr = gp.LinExpr()
         for i in range(1, num_trucks +1):
             #print("i: " + str(i))
@@ -68,10 +68,10 @@ def AP(num_trucks, end, Q, num_spaces, bids, flex, buffer, x_initialize):
                 for k in range(k_lower, k_upper):
                     constr += x_i_j[i, k] 
         
-            #print(j, i)
+            #print(jointData, i)
             
         m.addConstr(constr <= num_spaces)
-        #print('j: ' + str(j))
+        #print('jointData: ' + str(jointData))
         #print(constr) 
             
             
@@ -126,7 +126,7 @@ def AP(num_trucks, end, Q, num_spaces, bids, flex, buffer, x_initialize):
     obj = gp.LinExpr()
     for i in range(1, num_trucks +1):
         for j in range(0, end +1):
-            #obj += Q['s_i'][i-1]*x_i_j[i,j]
+            #obj += Q['s_i'][i-1]*x_i_j[i,jointData]
             obj += bids.iloc[j][i -1]*x_i_j[i,j]
     #     obj += b_i[i]*Q['s_i'][i]
     #     #obj = b_i*weight + e_i*weights?
@@ -184,7 +184,7 @@ def AP(num_trucks, end, Q, num_spaces, bids, flex, buffer, x_initialize):
             
     
     #store data on all of the vehicle, legally parked and double parked
-    #first though, need to assess the x_i_j to find when vehicle i is scheduled, captured by j
+    #first though, need to assess the x_i_j to find when vehicle i is scheduled, captured by jointData
     park_events = pd.DataFrame(columns = ['Truck', 'a_i', 's_i', 'd_i', 'Park Type'])
     for i in range(0, len(Q)):
         park_data = []
@@ -197,8 +197,8 @@ def AP(num_trucks, end, Q, num_spaces, bids, flex, buffer, x_initialize):
             park_data.append("Dbl Park")
         else:
             for j in range(0, end):
-                #search over time step j for the assignment (==1)
-                #if int(x_i_j[i+1, j].getAttr("x")) == 1:
+                #search over time step jointData for the assignment (==1)
+                #if int(x_i_j[i+1, jointData].getAttr("x")) == 1:
                 if np.round(x_i_j[i+1, j].getAttr("x")) == 1:
                     park_data.append(j)
                     park_data.append(Q['s_i'][i])

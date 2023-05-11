@@ -37,10 +37,10 @@ def MOD_flex(num_trucks, num_spaces, Q, buffer, start, end, end_scenario, t_init
                 for j in range(0, len(vertices)) if j != i]
         
         
-        #Generate the specific M for each i and j vehicle pair.  Of note, this code
-        #will generate the diagonal elements of the matrix as well, e.g. i == j, but
+        #Generate the specific M for each i and jointData vehicle pair.  Of note, this code
+        #will generate the diagonal elements of the matrix as well, e.g. i == jointData, but
         #this will not impact the contraints below because there is logic to prevent
-        #generating a constraint where i == j
+        #generating a constraint where i == jointData
         
         M_df = pd.DataFrame()
         M_inst = []
@@ -59,6 +59,8 @@ def MOD_flex(num_trucks, num_spaces, Q, buffer, start, end, end_scenario, t_init
         #-----------------------------------------------------------------------------
         # Create optimization model
         m = gp.Model('smartcurb')
+        m.setParam('OutputFlag', 0)
+        m.update()
         
         #-----------------------------------------------------------------------------
         # VARIABLES
@@ -101,14 +103,14 @@ def MOD_flex(num_trucks, num_spaces, Q, buffer, start, end, end_scenario, t_init
         # + b_i[i] 
         
         # Relate time and service time to flow (5)
-        #m.addConstrs(t_i[j] >= ( (t_i[i] + Q['s_i'][i] + buffer) - (1 - x_i_j[i+1, j+1])*M ) 
-        #m.addConstrs(t_i[i] + Q['s_i'][i] + buffer - t_i[j] <= (1 - x_i_j[i+1, j+1])*M
+        #m.addConstrs(t_i[jointData] >= ( (t_i[i] + Q['s_i'][i] + buffer) - (1 - x_i_j[i+1, jointData+1])*M )
+        #m.addConstrs(t_i[i] + Q['s_i'][i] + buffer - t_i[jointData] <= (1 - x_i_j[i+1, jointData+1])*M
         
-        # m.addConstrs(t_i[j] >= t_i[i] + Q['s_i'][i] + buffer - (1 - x_i_j[i+1, j+1])*M
+        # m.addConstrs(t_i[jointData] >= t_i[i] + Q['s_i'][i] + buffer - (1 - x_i_j[i+1, jointData+1])*M
         #               for i in range(0, len(Q)) 
-        #               for j in range(0, len(Q)) if j != i)
+        #               for jointData in range(0, len(Q)) if jointData != i)
         
-        m.addConstrs( (t_i[j]/scale) >= ((t_i[i] + Q['s_i'].iloc[i] + buffer - ((1 - x_i_j[i+1, j+1])*M_df.iloc[i, j]))/scale) #go back to *M if going with the generic original M and not M_ij, M_df.iloc[i, j]
+        m.addConstrs( (t_i[j]/scale) >= ((t_i[i] + Q['s_i'].iloc[i] + buffer - ((1 - x_i_j[i+1, j+1])*M_df.iloc[i, j]))/scale) #go back to *M if going with the generic original M and not M_ij, M_df.iloc[i, jointData]
                       for i in range(0, len(Q)) 
                       for j in range(0, len(Q)) if j != i)
         
@@ -399,10 +401,10 @@ def MOD_flex_cf(num_trucks, num_spaces, Q, buffer, start, end, end_scenario, t_i
                 for i in range(0, len(vertices))
                 for j in range(0, len(vertices)) if j != i]
 
-        # Generate the specific M for each i and j vehicle pair.  Of note, this code
-        # will generate the diagonal elements of the matrix as well, e.g. i == j, but
+        # Generate the specific M for each i and jointData vehicle pair.  Of note, this code
+        # will generate the diagonal elements of the matrix as well, e.g. i == jointData, but
         # this will not impact the contraints below because there is logic to prevent
-        # generating a constraint where i == j
+        # generating a constraint where i == jointData
 
         M_df = pd.DataFrame()
         M_inst = []
@@ -427,7 +429,8 @@ def MOD_flex_cf(num_trucks, num_spaces, Q, buffer, start, end, end_scenario, t_i
         # -----------------------------------------------------------------------------
         # Create optimization model
         m = gp.Model('smartcurb')
-
+        m.setParam('OutputFlag', 0)
+        m.update()
         # -----------------------------------------------------------------------------
         # VARIABLES
 
@@ -470,16 +473,16 @@ def MOD_flex_cf(num_trucks, num_spaces, Q, buffer, start, end, end_scenario, t_i
         # + b_i[i]
 
         # Relate time and service time to flow (5)
-        # m.addConstrs(t_i[j] >= ( (t_i[i] + Q['s_i'][i] + buffer) - (1 - x_i_j[i+1, j+1])*M )
-        # m.addConstrs(t_i[i] + Q['s_i'][i] + buffer - t_i[j] <= (1 - x_i_j[i+1, j+1])*M
+        # m.addConstrs(t_i[jointData] >= ( (t_i[i] + Q['s_i'][i] + buffer) - (1 - x_i_j[i+1, jointData+1])*M )
+        # m.addConstrs(t_i[i] + Q['s_i'][i] + buffer - t_i[jointData] <= (1 - x_i_j[i+1, jointData+1])*M
 
-        # m.addConstrs(t_i[j] >= t_i[i] + Q['s_i'][i] + buffer - (1 - x_i_j[i+1, j+1])*M
+        # m.addConstrs(t_i[jointData] >= t_i[i] + Q['s_i'][i] + buffer - (1 - x_i_j[i+1, jointData+1])*M
         #               for i in range(0, len(Q))
-        #               for j in range(0, len(Q)) if j != i)
+        #               for jointData in range(0, len(Q)) if jointData != i)
 
         m.addConstrs((t_i[j] / scale) >= (
                     (t_i[i] + Q['s_i'].iloc[i] + buffer - ((1 - x_i_j[i + 1, j + 1]) * M_df.iloc[i, j])) / scale)
-                     # go back to *M if going with the generic original M and not M_ij, M_df.iloc[i, j]
+                     # go back to *M if going with the generic original M and not M_ij, M_df.iloc[i, jointData]
                      for i in range(0, len(Q))
                      for j in range(0, len(Q)) if j != i)
 

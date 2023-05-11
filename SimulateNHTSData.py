@@ -6,7 +6,7 @@ from collections import OrderedDict
 import pickle
 from gen_veh_arrivals import gen_veh_arrivals as gen_truck_arrivals
 def load_raw_nhts_data(useCols=None):
-    file = '/Users/connorforsythe/Downloads/csv/trippub.csv'
+    file = 'Data/NHTS/csv/trippub.csv'
     if(useCols==None):
         data = p.read_csv(file, nrows=10000)
     else:

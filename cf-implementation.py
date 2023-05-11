@@ -135,40 +135,48 @@ def setModelObjective(model, *args):
     model.update()
     return model
 
-np.random.seed(8131970)
-data = load_nhts_data()
-t_sample = select_n_trips(data, num_sample=10)
-t = construct_truth_dataframe(t_sample)
+if __name__=='__main__':
+    #Data construction
+    np.random.seed(8131970)
+    data = load_nhts_data()
+    t_sample = select_n_trips(data, num_sample=10)
+    t = construct_truth_dataframe(t_sample)
 
-truck = gen_truck_arrivals(10)
+    truck = gen_truck_arrivals(10)
 
-jointData = join_requests(t, truck)
-jointData.loc[:, 'b_i_OG'] = jointData.loc[:, 'a_i_OG']+10
-w = 50
-objective_dict = {'parked': [0, 0], 'weights': [w, 100-w], 'cols': [['Expected Double Park', 's_i'], ['Expected Cruising', 'Expected Cruising Time']]}
-# req_master = run_optimization(deepcopy(t), objective_dict, buffer=0)
+    jointData = join_requests(t, truck)
+    jointData.loc[:, 'b_i_OG'] = jointData.loc[:, 'a_i_OG']+10
 
-m = createGurobiModel()
-m, t_i = createTimeVars(m, jointData)
-m, x_i_j = createFlowVars(m, jointData)
-m, x_i_j = createNumberParkingSpotConstraint(m, x_i_j, num_spaces=4)
-m, x_i_j = createFlowPreservationConstraints(m, x_i_j, jointData)
-bigM = getBigMMatrix(jointData)
-m, t_i, x_i_j = createTimeOverlapConstraints(m, t_i, x_i_j, jointData)
-m, t_i = createTimeWindowConstraints(m, t_i, jointData)
-m, t_i, x_i_j = createTimeShiftConstraints(m, t_i, x_i_j, jointData)
-m = setModelParams(m, TimeLimit=45, MIPGap=0.01)
-doubleParkObj = getDoubleParkExpression(jointData, x_i_j)
-m = setModelObjective(m, doubleParkObj)
-t0 = m.status
-m.optimize()
-t = m.status, m.getObjective().getValue()
+    #Model construction and optimization
+    m = createGurobiModel()
+    m, t_i = createTimeVars(m, jointData)
+    m, x_i_j = createFlowVars(m, jointData)
+    m, x_i_j = createNumberParkingSpotConstraint(m, x_i_j, num_spaces=4)
+    m, x_i_j = createFlowPreservationConstraints(m, x_i_j, jointData)
+    bigM = getBigMMatrix(jointData)
+    m, t_i, x_i_j = createTimeOverlapConstraints(m, t_i, x_i_j, jointData)
+    m, t_i = createTimeWindowConstraints(m, t_i, jointData)
+    m, t_i, x_i_j = createTimeShiftConstraints(m, t_i, x_i_j, jointData)
+    m = setModelParams(m, TimeLimit=45, MIPGap=0.01)
+    doubleParkObj = getDoubleParkExpression(jointData, x_i_j)
+    m = setModelObjective(m, doubleParkObj)
+    t0 = m.status
+    m.optimize()
 
-end_state_t_i = []
-for i in t_i:
-    end_state_t_i.append(t_i[i].getAttr("x"))
+    #Outputs of Interest
+    t = m.status, m.getObjective().getValue()
 
-end_state_x_ij = []
-for i in range(len(jointData)+1):
-    for j in range(len(jointData) + 1):
-        end_state_x_ij.append(int(x_i_j[i, j].getAttr("x")))
+    end_state_t_i = []
+    for i in t_i:
+        end_state_t_i.append(t_i[i].getAttr("x"))
+
+    end_state_t_i = np.array(end_state_t_i)
+
+    end_state_x_ij = []
+    for i in range(len(jointData)+1):
+        tempRow = []
+        for j in range(len(jointData) + 1):
+            tempRow.append(int(x_i_j[i, j].getAttr("x")))
+        end_state_x_ij.append(tempRow)
+
+    end_state_x_ij = np.array(end_state_x_ij)

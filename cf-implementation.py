@@ -6,6 +6,7 @@ import gurobipy as gp
 from gurobipy import GRB
 from collections import OrderedDict
 from tqdm import tqdm, trange
+from datetime import datetime
 #This function creates a new instance of a Gurboi model with the name specified by the "name" argument
 def createGurobiModel(name='smartCurb'):
     m = gp.Model(name)
@@ -120,6 +121,32 @@ def createTimeShiftConstraints(model, t_i, x_i_j, data, start_scenario=0, end_sc
 
     return model, t_i, x_i_j
 
+#Constructs constraints that ensure that all previous decisions regarding time are respected
+def createPersistentTimeDecisionConstraints(model, t_i, data):
+    i = 0
+    for index, row in data.iterrows():
+
+        if(row['Assigned']==1):
+            model.addConstr(t_i[i]==row['a_i_Final'], name='Prev-T-{}'.format(index))
+            t_i[i].Start = row['a_i_Final']
+        i+=1
+    return model, t_i
+
+#Constructs constraints that ensure that all previous decisions regarding flow are respected
+def createPersistentFlowDecisionConstraints(model, x_i_j, prev_x_i_j):
+
+    for i in range(len(prev_x_i_j)):
+        for j in range(len(prev_x_i_j)):
+            if(j==0):
+                #Previous decisions with flow heading back to the "depot" need not be respected as
+                #The flow could move to a newly-added vehicle
+                model.addConstr(x_i_j[i,j] <= prev_x_i_j[i,j], name='Prev-X-{}-{}'.format(i,j))
+            else:
+                model.addConstr(x_i_j[i, j] == prev_x_i_j[i, j], name='Prev-X-{}-{}'.format(i, j))
+            x_i_j[i,j].Start = prev_x_i_j[i, j]
+
+    return model, x_i_j
+
 #Edits the models params.
 def setModelParams(model, **kwargs):
     for key, val in kwargs.items():
@@ -169,14 +196,15 @@ def constructOutputs(model, t_i, x_i_j, data):
 
     return r
 
-
 def applyAssignedTimesToData(returnDict):
     cleanOutputs = constructOutputs(*list(returnDict.values()))
-
-    pass
+    cleanOutputs['data'].loc[:, 'a_i_Final'] = cleanOutputs['t']
+    cleanOutputs['data'].loc[:, 'd_i_Final'] = cleanOutputs['data'].loc[:, 'a_i_Final']+cleanOutputs['data'].loc[:, 's_i']
+    cleanOutputs['data'].loc[:, 'Assigned'] = np.sum(cleanOutputs['x'], axis=1)[1:]
+    return cleanOutputs
 
 #Runs the full optimization routine
-def runOptimization(data, numSpaces):
+def runFullOptimization(data, numSpaces):
     # Model construction and optimization
     m = createGurobiModel()
     m, t_i = createTimeVars(m, data)
@@ -188,7 +216,7 @@ def runOptimization(data, numSpaces):
     m, t_i, x_i_j = createTimeOverlapConstraints(m, t_i, x_i_j, data)
     m, t_i = createTimeWindowConstraints(m, t_i, data) #TODO HERE IS THE ISSUE
     m, t_i, x_i_j = createTimeShiftConstraints(m, t_i, x_i_j, data)
-    m = setModelParams(m, TimeLimit=45, MIPGap=0.01)
+    m = setModelParams(m, MIPGap=0.01)
     doubleParkObj = getDoubleParkExpression(data, x_i_j)
     m = setModelObjective(m, doubleParkObj)
     t0 = m.status
@@ -204,24 +232,131 @@ def runOptimization(data, numSpaces):
 
     return r
 
+def runSlidingOptimization(data, numSpaces, tau=5, start=0, stop=(24*60)+1):
+    # Model construction and optimization
+    #r is a list that will store successive results over time
+    #Data should be sorted by received so that constraints moving from one time
+    #step to the next are not assigned to the wrong vehicles
+    data = data.sort_values('Received')
+    data.index = range(len(data))
+    prevLen = 0
+    r = []
+    indiciesToDrop = []
+    iterVar = trange(start, stop, tau)
+    passPrevDecisions = True
+    for j in iterVar:
+        data = data.loc[~data.index.isin(indiciesToDrop), :]
+        print('lol3 - {}'.format(len(data)))
+        tempData = data.loc[data.loc[:, 'Received']<=j, :]
+        print('lol4 - {}'.format(len(tempData)))
+        if(len(tempData)>0 and len(tempData)>prevLen):
+            m = createGurobiModel()
+            m, t_i = createTimeVars(m, tempData)
+            m, x_i_j = createFlowVars(m, tempData)
+            m, x_i_j = createNumberParkingSpotConstraint(m, x_i_j, num_spaces=numSpaces)
+            m, x_i_j = createFlowPreservationConstraints(m, x_i_j, tempData)
+            m, x_i_j = createSingleAssignmentConstraints(m, x_i_j, tempData)
+            bigM = getBigMMatrix(tempData)
+            m, t_i, x_i_j = createTimeOverlapConstraints(m, t_i, x_i_j, tempData)
+            m, t_i = createTimeWindowConstraints(m, t_i, tempData)
+            m, t_i, x_i_j = createTimeShiftConstraints(m, t_i, x_i_j, tempData)
+            m = setModelParams(m, TimeLimit=45, MIPGap=0.01)
+            doubleParkObj = getDoubleParkExpression(tempData, x_i_j)
+            m = setModelObjective(m, doubleParkObj)
+
+            #Now set constraints on previous decisions should there be any
+            if(len(r)>0 and passPrevDecisions):
+                m, t_i = createPersistentTimeDecisionConstraints(m, t_i, r[-1]['data'])
+                m, x_i_j = createPersistentFlowDecisionConstraints(m, x_i_j, r[-1]['x'])
+
+            #Drop vehicle considered whenever answers haven't changed
+            if(len(r)>1):
+                x0 = r[-2]['x']
+                x1 = r[-1]['x']
+                print(x0.shape)
+                print(x1.shape)
+                if(len(x0)<=len(x1)):
+                    diff = x1[:len(x0), :len(x0)] - x0
+                    print('lolol-5-{}'.format(diff.nonzero()))
+                    diffValue = np.sum(np.abs(diff))
+
+                else:
+                    diffValue = 1
+
+                print('lololol: {}'.format(np.sum(diff)))
+                if(diffValue==0):
+                    indiciesToDrop.extend(list(r[-2]['data'].index))
+                    indiciesToDrop = list(set(indiciesToDrop))
+                    passPrevDecisions = False
+                else:
+                    passPrevDecisions = True
+
+            t0 = m.status
+            m.optimize()
+            m.update()
+            print('Termination Code: {}'.format(m.status))
+
+            if(m.status==2):
+                tempR = OrderedDict({'model':m, 't':t_i, 'x':x_i_j, 'data':tempData})
+                tempR = applyAssignedTimesToData(tempR)
+            else:
+                tempR = m.status
+                tempR = OrderedDict({'model': m, 't': t_i, 'x': x_i_j, 'data': tempData})
+                print(data)
+                tempR = applyAssignedTimesToData(tempR)
+
+            tempR['passPrevDecisions'] = passPrevDecisions
+            tempR['indiciesToDrop'] = list(set(indiciesToDrop))
+            tempR['status'] = m.status
+            prevLen = len(list(set(indiciesToDrop)))
+            r.append(tempR)
+    return r
+
 if __name__=='__main__':
     #Data construction
     np.random.seed(8131970)
     data = load_nhts_data()
     r = OrderedDict()
-    for i in trange(100, 101):
-        t_sample = select_n_trips(data, num_sample=i)
-        t = construct_truth_dataframe(t_sample)
 
-        truck = gen_truck_arrivals(i)
+    t_sample = select_n_trips(data, num_sample=100)
+    t = construct_truth_dataframe(t_sample)
 
-        jointData = join_requests(t, truck)
-        jointData.loc[:, 'b_i_OG'] = jointData.loc[:, 'a_i_OG']+10
+    truck = gen_truck_arrivals(100)
 
-        early = jointData.loc[jointData.loc[:, 'Received']<700, :]
-        preR = runOptimization(jointData, 10)
-        if(type(preR)==int):
-            r[i] = (preR, jointData)
-        else:
-            r[i] = (preR, jointData)
+    jointData = join_requests(t, truck)
+    jointData.loc[:, 'b_i_OG'] = jointData.loc[:, 'a_i_OG'] + 10
+
+    early = jointData.loc[jointData.loc[:, 'Received'] < 700, :]
+    # preR = runFullOptimization(early, 2)
+    # r = constructOutputs(*list(preR.values()))
+    # r = applyAssignedTimesToData(preR)
+
+    t0 = datetime.now()
+    preR = runSlidingOptimization(jointData, 2)
+    t1 = datetime.now()
+    print('Running full optimization...')
+    preRFull = runFullOptimization(jointData, 2)
+    print('Full optimization run...')
+    t2 = datetime.now()
+
+    slideTime = t1-t0
+    fullTime = t2-t1
+
+    print('Sliding Time - {}'.format(slideTime.seconds))
+    print('Full Time - {}'.format(fullTime.seconds))
+    # for i in trange(100, 101):
+    #     t_sample = select_n_trips(data, num_sample=i)
+    #     t = construct_truth_dataframe(t_sample)
+    #
+    #     truck = gen_truck_arrivals(i)
+    #
+    #     jointData = join_requests(t, truck)
+    #     jointData.loc[:, 'b_i_OG'] = jointData.loc[:, 'a_i_OG']+10
+    #
+    #     early = jointData.loc[jointData.loc[:, 'Received']<700, :]
+    #     preR = runOptimization(jointData, 10)
+    #     if(type(preR)==int):
+    #         r[i] = (preR, jointData)
+    #     else:
+    #         r[i] = (preR, jointData)
 

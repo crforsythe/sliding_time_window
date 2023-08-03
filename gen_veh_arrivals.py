@@ -119,7 +119,7 @@ def gen_veh_arrivals(max_trucks, end=2400):
     
     #return the sum of the service durations for the instance
     sum_s = sum(s_i)
-    Q+=(7*60)
+    Q.loc[:, ['a_i_OG', 'b_i_OG', 'd_i_OG']]+=(7*60)
     Q.loc[:, 'Type'] = 'Truck'
     
     return Q

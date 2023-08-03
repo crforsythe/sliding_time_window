@@ -32,7 +32,7 @@ import math as math
 
 def seq_curb(num_spaces, Q, end):
 
-    try:
+    # try:
         
         # if Q['Trucks'].all() == None:
         #     #adaptations to the received Q matrix to aid truck identification later in the function
@@ -179,5 +179,5 @@ def seq_curb(num_spaces, Q, end):
         
         return total_dbl_park, dbl_parked_events, legal_parked_events, park_events_FCFS
 
-    except:
-        return
+    # except:
+    #     return

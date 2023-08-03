@@ -8,9 +8,9 @@ from gen_veh_arrivals import gen_veh_arrivals as gen_truck_arrivals
 def load_raw_nhts_data(useCols=None):
     file = 'Data/NHTS/csv/trippub.csv'
     if(useCols==None):
-        data = p.read_csv(file, nrows=10000)
+        data = p.read_csv(file)
     else:
-        data = p.read_csv(file, usecols=useCols, nrows=10000)
+        data = p.read_csv(file, usecols=useCols)
     return data
 
 def load_nhts_data():
@@ -46,8 +46,11 @@ def load_nhts_data():
     r = r.rename(dict(zip(useCols, cleanNames)), axis=1)
 
     r = r.loc[r.loc[:, 'Urban Size']<6, :]
+    # r = convert_to_day_minutes(r)
+    r = r.loc[r.loc[:, 'Start Time']>=(7*60), :]
+    r = r.loc[r.loc[:, 'Start Time'] <= (18 * 60), :]
+    r = r.loc[r.loc[:, 'End Time'] <= (18 * 60), :]
     r = apply_probabilities(r)
-    r = convert_to_day_minutes(r)
     return r
 
 
@@ -67,10 +70,13 @@ def apply_probabilities(data):
     data.loc[:, 'p'] = data.loc[:, weight_col] / np.sum(data.loc[:, weight_col])
     return data
 
-def construct_truth_dataframe(data, phi=10, b_shift=10):
+def construct_truth_dataframe(data, phi=10, b_shift=10, receivedDelta=30):
     data.loc[:, 'Received'] = data.loc[:, 'Start Time']
+    data.loc[:, 'Received_OG'] = data.loc[:, 'Start Time']
+    data.loc[:, 'Received-Diff'] = data.loc[:, 'End Time']-data.loc[:, 'Start Time']
+    data.loc[data.loc[:, 'Received-Diff']>receivedDelta, 'Received'] = data.loc[data.loc[:, 'Received-Diff']>receivedDelta, 'End Time']-receivedDelta
     data.loc[:, 'a_i_OG'] = data.loc[:, 'End Time']
-    data.loc[:, 'b_i_OG'] = data.loc[:, 'a_i_OG']+b_shift*0
+    data.loc[:, 'b_i_OG'] = data.loc[:, 'a_i_OG']+b_shift
     data.loc[:, 's_i'] = data.loc[:, 'Dwell Time']
     data.loc[:, 'd_i_OG'] = data.loc[:, 'End Time']+data.loc[:, 'Dwell Time']
     data.loc[:, 'phi'] = phi
@@ -105,7 +111,7 @@ def convert_to_day_minutes(data):
     return data
 
 
-def join_requests(passenger, truck, phi=5):
+def join_requests(passenger, truck, phi=5, receivedDelta=30):
     truck.loc[:, 'No-Park Outcome'] = 'Double-Park'
     truck.loc[:, 'Expected Double Park'] = 1
     truck.loc[:, 'Actual Double Park'] = 1
@@ -113,7 +119,10 @@ def join_requests(passenger, truck, phi=5):
     truck.loc[:, 'Expected Cruising'] = 0
     truck.loc[:, 'Actual Cruising'] = 0
 
-    truck.loc[:, 'Received'] = truck.loc[:, 'a_i_OG']-30
+    truck.loc[:, 'Expected Cruising Time'] = 0
+    truck.loc[:, 'Actual Cruising Time'] = 0
+
+    truck.loc[:, 'Received'] = truck.loc[:, 'a_i_OG']-receivedDelta
     truck.loc[:, 'a_i_OG'] = truck.loc[:, 'a_i_OG']
     truck.loc[:, 'd_i_OG'] = truck.loc[:, 'd_i_OG']
     truck.loc[:, 'phi'] = phi
@@ -127,15 +136,15 @@ if __name__=='__main__':
     np.random.seed(8131970)
     data = load_nhts_data()
     t_sample = select_n_trips(data, num_sample=50)
-    t_sample = select_n_trips(data, num_sample=20)
-    t = construct_truth_dataframe(t_sample)
-
-    truck = gen_truck_arrivals(50)
-
-    j = join_requests(t, truck)
-    w = 50
-    objective_dict = {'parked': [0, 0], 'weights': [w, 100-w], 'cols': [['Expected Double Park', 's_i'], ['Expected Cruising', 'Expected Cruising Time']]}
-    req_master = run_optimization(deepcopy(t), objective_dict, buffer=0)
+    # t_sample = select_n_trips(data, num_sample=20)
+    # t = construct_truth_dataframe(t_sample)
+    #
+    # truck = gen_truck_arrivals(50)
+    #
+    # j = join_requests(t, truck)
+    # w = 50
+    # objective_dict = {'parked': [0, 0], 'weights': [w, 100-w], 'cols': [['Expected Double Park', 's_i'], ['Expected Cruising', 'Expected Cruising Time']]}
+    # req_master = run_optimization(deepcopy(t), objective_dict, buffer=0)
 
     # objective_dict = {'parked': [0, 0], 'weights': [w, 100-w], 'cols': [['Expected Double Park', 's_i'], ['Expected Cruising', 'Expected Cruising Time']]}
     # req_master = run_optimization(deepcopy(jointData), objective_dict)

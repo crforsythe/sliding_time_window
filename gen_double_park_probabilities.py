@@ -4,10 +4,13 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import seaborn as sns
 def loadData(large=False):
+
     if(large):
         file = '/Users/connorforsythe/Dropbox/CMU/SmartCurbs/Street Sense Data/All parking data delivery 9 Apr 2022/all_parking_context_data_9_April_2022.csv'
+        file = 'Data/Street Sense Data/All parking data delivery 9 Apr 2022/all_parking_context_data_9_April_2022.csv'
     else:
         file = '/Users/connorforsythe/Dropbox/CMU/SmartCurbs/Street Sense Data/All parking data delivery 9 Apr 2022/all_parking_data_9_April_2022.csv'
+        file = 'Data/Street Sense Data/All parking data delivery 9 Apr 2022/all_parking_data_9_April_2022.csv'
     data = p.read_csv(file)
     return data
 

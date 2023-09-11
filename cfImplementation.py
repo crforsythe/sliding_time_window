@@ -797,6 +797,7 @@ if __name__=='__main__':
     # np.random.seed(111)
     a = load_nhts_data()
     j = simulateData(20,1, a, receivedDelta=5)
+    r = runSlidingOptimization(j, 1, buffer=0, tau=5)
     # # j.loc[:, 'Received'] = min(j.loc[:, 'Received'])
     # jc = deepcopy(j)
     # # j.loc[1, 's_i'] = 1

@@ -80,7 +80,6 @@ def createLocationVars(model, data, numSpaces = (1,1)):
         k = 0
         model.addConstr(p_i_k.sum(i, '*')<=1,name='p_{}_k<=1'.format(i))
         for j in locationColInds:
-            print('lol - {}'.format(data.iloc[i,j]))
             model.addConstr(p_i_k[i,k]<=data.iloc[i,j], name='p_{}_{}<Preference'.format(i,k))
             p_i_k[i,k].Start = 0
             k+=1
@@ -241,7 +240,7 @@ def createPersistentFlowDecisionConstraints(model, x_i_j, prev_x_i_j):
 
 
     for i in range(1, len(prev_x_i_j)):
-        model.addConstr(x_i_j.sum(i, '*')>=np.sum(prev_x_i_j[i, :]), name='Prev-X-{}'.format(i))
+        model.addConstr(x_i_j.sum(i, '*')==np.sum(prev_x_i_j[i, :]), name='Prev-X-{}'.format(i))
 
 
     return model, x_i_j
@@ -326,9 +325,11 @@ def setModelObjectiveN(model, obj, index, priority, weight):
     return model
 
 #Returns a pretty version of the optimization output
-def constructOutputs(model, t_i, x_i_j, data, code=-1):
+def constructOutputs(model, t_i, x_i_j, p_i_k, y_i_k, data, code=-1):
     # Outputs of Interest
     # t = model.status, model.getObjective().getValue()
+    locationCols = getLocationCols(data)
+
 
     end_state_t_i = []
     for i in t_i:
@@ -345,7 +346,25 @@ def constructOutputs(model, t_i, x_i_j, data, code=-1):
 
     end_state_x_ij = np.array(end_state_x_ij)
 
-    r = {'t': end_state_t_i, 'x': end_state_x_ij, 'data':data, 'code':code}
+    end_state_p_ik = []
+    for i in range(len(data)):
+        tempRow = []
+        for k in range(len(locationCols)):
+            tempRow.append(int(p_i_k[i, k].getAttr("x")))
+        end_state_p_ik.append(tempRow)
+
+    end_state_p_ik = np.array(end_state_p_ik)
+
+    end_state_y_ik = []
+    for i in range(len(data)):
+        tempRow = []
+        for k in range(len(locationCols)):
+            tempRow.append(int(y_i_k[i, k].getAttr("x")))
+        end_state_y_ik.append(tempRow)
+
+    end_state_y_ik = np.array(end_state_y_ik)
+
+    r = {'t': end_state_t_i, 'x': end_state_x_ij, 'p':end_state_p_ik, 'y':end_state_y_ik, 'data':data, 'code':code}
 
     return r
 
@@ -525,7 +544,7 @@ def runSlidingOptimization(data, numSpaces=(1,1), tau=5, start=0, stop=(24*60)+1
             print('Termination Code: {}'.format(m.status))
 
             if(m.status==2):
-                tempR = OrderedDict({'model':m, 't':t_i, 'x':x_i_j, 'data':tempData})
+                tempR = OrderedDict({'model':m, 't':t_i, 'x':x_i_j, 'p':p_i_k, 'y':y_i_k, 'data':tempData})
                 tempR = applyAssignedTimesToData(tempR)
             else:
                 tempR = m.status
@@ -541,8 +560,9 @@ def runSlidingOptimization(data, numSpaces=(1,1), tau=5, start=0, stop=(24*60)+1
 
 
     r = collateFinalOutcomes(r)
-    r.loc[:, 'Unassigned'] = 1-r.loc[:, 'Assigned']
+
     try:
+        r.loc[:, 'Unassigned'] = 1 - r.loc[:, 'Assigned']
         r = r.sort_values('Received')
         r = r.sort_values(['Unassigned', 'a_i_Final'])
     except:
@@ -884,7 +904,7 @@ if __name__=='__main__':
     a = load_nhts_data()
     j = simulateData(0,10, a)
 
-    r = runSlidingOptimization(j, (0,1), buffer=0, tau = 5)
+    r = runSlidingOptimization(j, (0,1), buffer=1, tau = 5)
 
     # # j.loc[:, 'Received'] = min(j.loc[:, 'Received'])
     # jc = deepcopy(j)

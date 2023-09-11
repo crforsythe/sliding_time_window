@@ -85,10 +85,6 @@ def createLocationVars(model, data, numSpaces = (1,1)):
             p_i_k[i,k].Start = 0
             k+=1
 
-
-    for k in range(len(locationCols)):
-        model.addConstr(p_i_k.sum('*', k)<=numSpaces[k])
-
     model.update()
 
 
@@ -459,7 +455,7 @@ def getUnchangingIndicies(outcomeList, currentTime):
     return r
 
 
-def runSlidingOptimization(data, numSpaces=(1,1), tau=5, start=0, stop=(24*60)+1, buffer=0, weightDoubleParking=1, weightCruising=1, timeLimit=45):
+def runSlidingOptimization(data, numSpaces=(1,1), tau=5, start=0, stop=(24*60)+1, buffer=0, weightDoubleParking=1, weightCruising=0, timeLimit=45):
     # Model construction and optimization
     #r is a list that will store successive results over time
     #Data should be sorted by received so that constraints moving from one time
@@ -883,12 +879,12 @@ if __name__=='__main__':
     pass
     # #Data construction
     np.random.seed(8131970)
-    # np.random.seed(11111)
+    np.random.seed(11111)
     # np.random.seed(111)
     a = load_nhts_data()
-    j = simulateData(1,20, a)
+    j = simulateData(0,10, a)
 
-    r = runSlidingOptimization(j, (1,1), buffer=0)
+    r = runSlidingOptimization(j, (0,1), buffer=0, tau = 5)
 
     # # j.loc[:, 'Received'] = min(j.loc[:, 'Received'])
     # jc = deepcopy(j)

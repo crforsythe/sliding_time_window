@@ -723,9 +723,16 @@ def runFCFS(numSpots, data):
     data.loc[:, 'phi'] = data.loc[:, 'phi']
     data.loc[:, 'Prev Assigned'] = 'nan'
 
+    locationCols = getLocationCols(data)
+    locationColInds = getLocationColInds(data)
+    numSpotsTuple = deepcopy(numSpots)
+
     data = data.sort_values('a_i')
 
-    parkTimes = [-1]*numSpots
+    parkTimes = []
+    for numSpot in numSpots:
+        parkTimes.append([-1]*numSpot)
+    print(parkTimes)
     assignedCol = []
 
     startIndex = list(data.columns).index('a_i')
@@ -735,12 +742,19 @@ def runFCFS(numSpots, data):
         tempStart = row[startIndex]
         tempEnd = row[endIndex]
         tempAssigned = False
-        for j in range(numSpots):
-            tempPrevEnd = parkTimes[j]
-            if(not tempAssigned and tempPrevEnd<tempStart):
-                assignedCol.append(1)
-                tempAssigned = True
-                parkTimes[j] = tempEnd
+        k = 0
+        for locationColInd in locationColInds:
+            tempNumSpots = numSpots[k]
+            tempAcceptable = row[locationColInd]
+            if(tempAcceptable==1 and tempAssigned == False):
+                for j in range(tempNumSpots):
+                    print(parkTimes[k])
+                    tempPrevEnd = parkTimes[k][j]
+                    if (not tempAssigned and tempPrevEnd < tempStart):
+                        assignedCol.append(1)
+                        tempAssigned = True
+                        parkTimes[k][j] = tempEnd
+            k+=1
         if(not tempAssigned):
             assignedCol.append(0)
 
@@ -763,14 +777,14 @@ def runFullSetOfResults(numSpots, data, buffer, tau, weightDoubleParking, weight
     t0 = datetime.now()
 
     try:
-        r['FCFS'] = runFCFS(np.sum(numSpots), deepcopy(data))
+        r['FCFS'] = runFCFS(numSpots, deepcopy(data))
     except Exception as e:
         r['FCFS'] = e
 
     t1 = datetime.now()
     fullData = deepcopy(data)
     fullTau = max(fullData.loc[:, 'Received'])-min(fullData.loc[:, 'Received'])-1
-    fullTau = 20000
+    fullTau = 1000
     fullData.loc[:, 'Received_OG'] = fullData.loc[:, 'Received']
     fullData.loc[:, 'Received'] = -1
 
@@ -813,7 +827,7 @@ def runFullSetOfResults(numSpots, data, buffer, tau, weightDoubleParking, weight
         r['full-unassigned'] = e
 
 
-    saveFile = '/Users/connorforsythe/Library/CloudStorage/Box-Box/CMU/SmartCurbs/Results/2023-7-17-10MinLimit/Res-{}.dat'.format(saveIndex)
+    saveFile = '/Users/connorforsythe/Library/CloudStorage/Box-Box/CMU/SmartCurbs/Results/2023-9-12-Prelim/Res-{}.dat'.format(saveIndex)
 
     with open(saveFile, 'wb') as file:
         pickle.dump(r, file)
@@ -902,9 +916,11 @@ if __name__=='__main__':
     np.random.seed(11111)
     # np.random.seed(111)
     a = load_nhts_data()
-    j = simulateData(0,10, a)
+    j = simulateData(1,20, a)
 
-    r = runSlidingOptimization(j, (0,1), buffer=1, tau = 5)
+    # r = runSlidingOptimization(j, (1,2), buffer=1, tau = 5)
+
+    r = runFCFS((1,1), j)
 
     # # j.loc[:, 'Received'] = min(j.loc[:, 'Received'])
     # jc = deepcopy(j)

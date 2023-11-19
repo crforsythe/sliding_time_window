@@ -9,6 +9,7 @@ from tqdm import tqdm, trange
 from datetime import datetime
 from gurobipy import abs_ as gabs
 import pickle
+from multiprocessing import Pool
 import multiprocessing as mp
 # from execute_v2 import park_events_FCFS,runtime_FCFS
 from seq_arrival_new import seq_curb
@@ -75,7 +76,7 @@ def getBigMMatrix(data, start_scenario=0, end_scenario=(60*24), buffer=0):
         tempRow = []
         for j in range(0, len(data)):
             M_ij = min(end_scenario, data['b_i_OG'].iloc[i] + data['s_i'].iloc[i] + buffer) - max(start_scenario, data['a_i_OG'].iloc[j])
-            tempRow.append(1e8)
+            tempRow.append(M_ij)
 
         M_inst.append(tempRow)
     M_df = p.DataFrame(M_inst)
@@ -103,7 +104,7 @@ def createTimeWindowConstraints(model, t_i, data, start_scenario=0, end_scenario
 
     for i in range(len(data)):
 
-        # model.addConstr(((t_i[i] + data['s_i'].iloc[i] + buffer) / scale) <= (end_scenario / scale), name='ParkPast-{}'.format(i)) #TODO This constraint is causing infeasible solutions and really isn't necessary
+        model.addConstr(((t_i[i] + data['s_i'].iloc[i]) / scale) <= (end_scenario / scale), name='ParkPast-{}'.format(i)) #TODO This constraint is causing infeasible solutions and really isn't necessary
         model.addConstr((t_i[i] / scale) >= (start_scenario / scale), name='Start-{}'.format(i))
         model.addConstr((t_i[i] / scale) <= (end_scenario / scale), name='End-{}'.format(i))
 
@@ -111,7 +112,7 @@ def createTimeWindowConstraints(model, t_i, data, start_scenario=0, end_scenario
 
     return model, t_i
 
-#Appies the constraints that prevent times being shifted outside of the [a_i, b_i] domain
+# #Appies the constraints that prevent times being shifted outside of the [a_i, b_i] domain
 def createTimeShiftConstraints(model, t_i, x_i_j, data, start_scenario=0, end_scenario=(24*60), buffer=0, scale=1):
     for i in t_i:
         if(data['a_i_OG'].iloc[i] < start_scenario):  # can have a conflict where we are considering a_i that occurred before the start of this window
@@ -127,32 +128,29 @@ def createTimeShiftConstraints(model, t_i, x_i_j, data, start_scenario=0, end_sc
     return model, t_i, x_i_j
 
 #Constructs constraints that ensure that all previous decisions regarding time are respected
-def createPersistentTimeDecisionConstraints(model, t_i, data):
+def createPersistentTimeDecisionConstraints(model, t_i, data, currentTime):
     i = 0
     for index, row in data.iterrows():
 
-        if(row['Assigned']==1):
+        if(row['Assigned']==1 and row['a_i_OG-nu']<=currentTime):
             model.addConstr(t_i[i]==row['a_i_Final'], name='Prev-T-{}'.format(index))
             t_i[i].Start = row['a_i_Final']
         i+=1
     return model, t_i
 
 #Constructs constraints that ensure that all previous decisions regarding flow are respected
-def createPersistentFlowDecisionConstraints(model, x_i_j, prev_x_i_j):
+def createPersistentFlowDecisionConstraints(model, x_i_j, prev_x_i_j, data, currentTime):
 
     for i in range(len(prev_x_i_j)):
         for j in range(len(prev_x_i_j)):
-    #         if(j==0):
-    #             #Previous decisions with flow heading back to the "depot" need not be respected as
-    #             #The flow could move to a newly-added vehicle
-    #             model.addConstr(x_i_j[i,j] <= prev_x_i_j[i,j], name='Prev-X-{}-{}'.format(i,j))
-    #         else:
-    #             model.addConstr(x_i_j[i, j] == prev_x_i_j[i, j], name='Prev-X-{}-{}'.format(i, j))
             x_i_j[i,j].Start = prev_x_i_j[i, j]
 
 
     for i in range(1, len(prev_x_i_j)):
-        model.addConstr(x_i_j.sum(i, '*')==np.sum(prev_x_i_j[i, :]), name='Prev-X-{}'.format(i))
+        data_i = i-1
+        a_i_rho_index = list(data.columns).index('a_i_OG-rho')
+        if(data.iloc[data_i, a_i_rho_index]<currentTime):
+            model.addConstr(x_i_j.sum(i, '*')>=np.sum(prev_x_i_j[i, :]), name='Prev-X-{}'.format(i))
 
 
     return model, x_i_j
@@ -189,24 +187,6 @@ def getExpectedCruisingExpression(data, x_i_j, scale=1):
 
 
 def applyDeviationObjectiveVariables(model, t_i, x_i_j, data, scale=1):
-    # have trouble implementing the min(abs(x)) where x = t_i[i] - Q['a_i'].iloc[i]
-    # so, following these instruction to work around and create a linear function
-    # https://support.gurobi.com/hc/en-us/community/posts/360074428532-How-to-handle-absolute-value-in-objective-function-
-    # https://math.stackexchange.com/questions/432003/converting-absolute-value-program-into-linear-program
-    # r_i = model.addVars(data.shape[0], vtype=GRB.CONTINUOUS, name='r_i')
-    # s_i = model.addVars(data.shape[0], vtype=GRB.CONTINUOUS, name='s_i')
-
-
-    # model.update()
-    #
-    # assignment_dev = gp.LinExpr()
-    # for i in range(0, len(data)):
-    #     x = (x_i_j.sum(i + 1, '*')) * (t_i[i] / scale - data['a_i_OG'].iloc[
-    #         i] / scale)  # deviation weight by if the truck was assigned or not (only consider deviation if truck is assigned)
-    #     model.addConstr(r_i[i] - s_i[i] == x)
-    #
-    #     assignment_dev += (r_i[i] + s_i[i])
-    #
 
     assignment_dev = gp.LinExpr()
     for i in range(0, len(data)):
@@ -280,6 +260,7 @@ def getUnchangingIndicies(outcomeList, currentTime):
 
     sharedIndices = index0 & index1
 
+    #If there are no shared indicies, don't do anything
     if(len(sharedIndices)==0):
         return None
 
@@ -287,7 +268,8 @@ def getUnchangingIndicies(outcomeList, currentTime):
     sharedIndices0 = data0.index.isin(sharedIndices)
     sharedIndices1 = data1.index.isin(sharedIndices)
 
-    #Create separate set of shared indices for x, since x also includes the depot
+    #Create separate set of shared indices for x,
+    #since x also includes the depot we start with a true value
     sharedXIndices0 = [True]
     sharedXIndices1 = [True]
 
@@ -303,11 +285,13 @@ def getUnchangingIndicies(outcomeList, currentTime):
     x1 = x1[sharedXIndices1, :]
     x1 = x1[:, sharedXIndices1]
 
+    #Identify the difference in decision between the past two time steps
     xDiff = x1-x0
     # Get relevant t outcomes and the difference across iterations
     t0 = outcomeList[-2]['t'][sharedIndices0]
     t1 = outcomeList[-1]['t'][sharedIndices1]
 
+    #Identify the difference in decision between the past two time steps
     tDiff = t1 - t0
 
 
@@ -317,20 +301,26 @@ def getUnchangingIndicies(outcomeList, currentTime):
     #If things remain the same between time steps and a given vehicle is no
     #longer relevant they can be dropped. Inverse is also stored.
     indicesToDrop = (tDiff==0)&(preIndices)&(xDiff[1:, :].sum(axis=1)==0)
+    indicesToDrop = preIndices
+    assignedIndicesToDrop = (data1.loc[sharedIndices, 'd_i_Final']<currentTime)&(data1.loc[sharedIndices, 'Assigned']==1)
+    unassignedIndicesToDrop = (data1.loc[sharedIndices, 'b_i_OG'] < currentTime) & (data1.loc[sharedIndices, 'Assigned'] == 0)
+    indicesToDrop = (assignedIndicesToDrop)|(unassignedIndicesToDrop)
     indicesToKeep = np.logical_not(indicesToDrop)
 
-    xIndicesToDrop = [True]
+    #Store all indicies to drop and keep - depot does not need to be dropped
+    xIndicesToDrop = [False]
     xIndicesToKeep = [True]
 
     xIndicesToDrop.extend(list(indicesToDrop))
     xIndicesToKeep.extend(list(indicesToKeep))
 
+    #Return "locked" (i.e., to-drop) and "unlocked" (i.e., to-keep) features
     r = {}
     r['locked'] = {}
     r['unlocked'] = {}
 
     r['locked']['t'] = t1[list(indicesToDrop)]
-    if(len(r['locked']['t']>0)):
+    if(len(r['locked']['t'])>0):
         r['locked']['x'] = x1
         r['locked']['x'] = r['locked']['x'][xIndicesToDrop, :]
         r['locked']['x'] = r['locked']['x'][:, xIndicesToDrop]
@@ -341,17 +331,23 @@ def getUnchangingIndicies(outcomeList, currentTime):
     # r['locked']['data'] = data1.loc[indicesToDrop.index, :]
     r['locked']['indices'] = list(indicesToDrop[indicesToDrop==True].index)
 
+    #Keep all indices that will continue to be relevant to the algorithm
     r['unlocked']['indices'] = list(data1.loc[~data1.index.isin(r['locked']['indices']), :].index)
     r['unlocked']['t'] = outcomeList[-1]['t'][data1.index.isin(r['unlocked']['indices'])]
     r['unlocked']['data'] = outcomeList[-1]['data'].loc[r['unlocked']['indices'], :]
     r['unlocked']['x'] = outcomeList[-1]['x']
-    xUnlockedIndices = [True]
+    xUnlockedIndices = [True] #keep the depot node
     xUnlockedIndices.extend(list(data1.index.isin(r['unlocked']['indices'])))
 
+    #the x-matrix that is part of the continued algorithm must be transformed
+    #
     r['unlocked']['x'] = r['unlocked']['x'][xUnlockedIndices, :]
     r['unlocked']['x'] = r['unlocked']['x'][:, xUnlockedIndices]
-    if(len(r['locked']['t']>0)):
+    #Transformation only necessary if there are some persistent requests
+    if(len(r['locked']['t'])>0):
+        #Transformation such that the updated depot correctly leads to those vehicles still parked
         r['unlocked']['x'][0, :] = outcomeList[-1]['x'][:, xUnlockedIndices].sum(axis=0)-np.multiply(r['unlocked']['x'][1:, :].sum(axis=0), 1)
+        #Diagonal should remain zero
         r['unlocked']['x'][0, 0] = 0
 
     return r
@@ -368,8 +364,8 @@ def runFullOptimization(data, numSpaces, buffer, weightDoubleParking, weightCrui
     m, x_i_j = createSingleAssignmentConstraints(m, x_i_j, data)
     bigM = getBigMMatrix(data)
     m, t_i, x_i_j = createTimeOverlapConstraints(m, t_i, x_i_j, data, buffer=buffer)
-    m, t_i = createTimeWindowConstraints(m, t_i, data) #TODO HERE IS THE ISSUE
-    m, t_i, x_i_j = createTimeShiftConstraints(m, t_i, x_i_j, data)
+    m, t_i = createTimeWindowConstraints(m, t_i, data)
+    # m, t_i, x_i_j = createTimeShiftConstraints(m, t_i, x_i_j, data)
     # m = setModelParams(m, MIPGap=0.01, ModelSense=GRB.MINIMIZE, TimeLimit=numSeconds, Threads=1)
     m = setModelParams(m, MIPGap=0.0001, ModelSense=GRB.MINIMIZE, TimeLimit=numSeconds, Threads=1)
     doubleParkObj = getExpectedDoubleParkExpression(data, x_i_j)
@@ -393,7 +389,7 @@ def runFullOptimization(data, numSpaces, buffer, weightDoubleParking, weightCrui
 
     return r
 
-def runSlidingOptimization(data, numSpaces, tau=5, start=0, stop=(24*60)+1, buffer=0, weightDoubleParking=1, weightCruising=1, timeLimit=45):
+def runSlidingOptimization(data, numSpaces, zeta=5, start=0, stop=(24*60)+1, buffer=0, weightDoubleParking=1, weightCruising=1, timeLimit=45, tau=0, rho=0, nu=0, timeLock = True, positionLock = True):
     # Model construction and optimization
     #r is a list that will store successive results over time
     #Data should be sorted by received so that constraints moving from one time
@@ -406,7 +402,7 @@ def runSlidingOptimization(data, numSpaces, tau=5, start=0, stop=(24*60)+1, buff
     r = []
     unchangingDicts = []
     indiciesToDrop = []
-    iterVar = trange(max(start, min(data.loc[:, 'Received'])), stop, tau)
+    iterVar = trange(max(start, min(data.loc[:, 'Received'])), stop, zeta)
     passPrevDecisions = False
     for j in iterVar:
 
@@ -416,7 +412,14 @@ def runSlidingOptimization(data, numSpaces, tau=5, start=0, stop=(24*60)+1, buff
                 unchangingDicts.append(unchangingDict)
                 indiciesToDrop.extend(unchangingDict['locked']['indices'])
         data = data.loc[~data.index.isin(indiciesToDrop), :]
-        tempData = data.loc[data.loc[:, 'Received'] <= j, :]
+        data.loc[:, 'a_i_OG-tau'] = data.loc[:, 'a_i_OG']-tau
+        data.loc[:, 'a_i_OG-rho'] = data.loc[:, 'a_i_OG'] - rho
+        data.loc[:, 'a_i_OG-nu'] = data.loc[:, 'a_i_OG'] - nu
+        data.loc[:, 'tau'] = tau
+        data.loc[:, 'rho'] = rho
+        data.loc[:, 'eta'] = nu
+        data.loc[:, 'zeta'] = zeta
+        tempData = data.loc[(data.loc[:, 'Received'] <= j)&(data.loc[:, 'a_i_OG'] <= (j+tau)), :]
 
         if(len(tempData)>0): #
             #Create Model
@@ -428,11 +431,16 @@ def runSlidingOptimization(data, numSpaces, tau=5, start=0, stop=(24*60)+1, buff
             # Changes over the running time
             # Drop vehicle considered whenever answers haven't changed
             if (len(r) > 1 and unchangingDict!=None):
-                m, t_i = createPersistentTimeDecisionConstraints(m, t_i, unchangingDict['unlocked']['data'])
-                m, x_i_j = createPersistentFlowDecisionConstraints(m, x_i_j, unchangingDict['unlocked']['x'])
+                if(timeLock):
+                    m, t_i = createPersistentTimeDecisionConstraints(m, t_i, unchangingDict['unlocked']['data'], j)
+                if(positionLock):
+                    m, x_i_j = createPersistentFlowDecisionConstraints(m, x_i_j, unchangingDict['unlocked']['x'],
+                                                                       r[-1]['data'], j)
             elif (len(r) > 0 and passPrevDecisions):
-                m, t_i = createPersistentTimeDecisionConstraints(m, t_i, r[-1]['data'])
-                m, x_i_j = createPersistentFlowDecisionConstraints(m, x_i_j, r[-1]['x'])
+                if(timeLock):
+                    m, t_i = createPersistentTimeDecisionConstraints(m, t_i, r[-1]['data'], j)
+                if(positionLock):
+                    m, x_i_j = createPersistentFlowDecisionConstraints(m, x_i_j, r[-1]['x'], r[-1]['data'], j)
 
             m, x_i_j = createNumberParkingSpotConstraint(m, x_i_j, num_spaces=numSpaces)
             m, x_i_j = createFlowPreservationConstraints(m, x_i_j, tempData)
@@ -440,15 +448,12 @@ def runSlidingOptimization(data, numSpaces, tau=5, start=0, stop=(24*60)+1, buff
             m, t_i, x_i_j = createTimeOverlapConstraints(m, t_i, x_i_j, tempData, buffer=buffer)
             m, t_i = createTimeWindowConstraints(m, t_i, tempData)
             m, t_i, x_i_j = createTimeShiftConstraints(m, t_i, x_i_j, tempData)
-            # m = setModelParams(m, TimeLimit=timeLimit, MIPGap=0.01, ModelSense=GRB.MINIMIZE, Threads=1)
-            m = setModelParams(m, TimeLimit=timeLimit, MIPGap=0.0001, ModelSense=GRB.MINIMIZE, Threads=1)
+            m = setModelParams(m, TimeLimit=timeLimit, MIPGap=0.01, ModelSense=GRB.MINIMIZE, Threads=1)
             doubleParkObj = getExpectedDoubleParkExpression(tempData, x_i_j)
             cruisingObj = getExpectedCruisingExpression(data, x_i_j)
             m = setModelObjectiveN(m, doubleParkObj, 0, 1, weightDoubleParking)
             m = setModelObjectiveN(m, cruisingObj, 1, 1, weightCruising)
             m, t_i, x_i_j = applyDeviationObjectiveVariables(m, t_i, x_i_j, tempData)
-            # absDifferenceObj = getAbsoluteDeviationExpression(data, t_i)
-            # m = setModelObjective(m, [[doubleParkObj, 100, 1], [absDifferenceObj, 0, 1]])
 
 
 
@@ -592,11 +597,17 @@ def collateTimeWindowOutcomes(outcomeList):
 def simulateData(numCars, numTrucks, nhts_data, windowShift=10, receivedDelta=120):
     data = nhts_data
     r = OrderedDict()
+    if(numCars==0):
+        t_sample = select_n_trips(data, num_sample=1)  # Change the number of personal vehicles simulated
+    else:
+        t_sample = select_n_trips(data, num_sample=numCars)  # Change the number of personal vehicles simulated
 
-    t_sample = select_n_trips(data, num_sample=numCars)  # Change the number of personal vehicles simulated
     t = construct_truth_dataframe(t_sample, receivedDelta=receivedDelta)
 
-    truck = gen_truck_arrivals(numTrucks)  # Change the number of trucks simulated
+    if(numTrucks==0):
+        truck = gen_truck_arrivals(1)  # Change the number of trucks simulated
+    else:
+        truck = gen_truck_arrivals(numTrucks)  # Change the number of trucks simulated
 
     jointData = join_requests(t, truck, receivedDelta=receivedDelta)
     jointData.loc[:, 'b_i_OG'] = jointData.loc[:, 'a_i_OG'] + windowShift  # Change window for sliding
@@ -604,6 +615,16 @@ def simulateData(numCars, numTrucks, nhts_data, windowShift=10, receivedDelta=12
     jointData = jointData.sort_values('Received')
 
 
+    jointData.loc[:, 'Location0'] = 1
+    jointData.loc[:, 'Location1'] = 1
+
+    jointData.loc[jointData.loc[:, 'Type']=='Truck', 'Location0'] = 0
+
+    if(numCars==0):
+        jointData = jointData.loc[jointData.loc[:, 'Type']!='Passenger', :]
+
+    if (numTrucks == 0):
+        jointData = jointData.loc[jointData.loc[:, 'Type'] != 'Truck', :]
 
     return jointData
 
@@ -625,7 +646,7 @@ def runFCFS(numSpots, data):
     startIndex = list(data.columns).index('a_i')
     endIndex = list(data.columns).index('d_i')
 
-    for row in data.itertuples(index=False):
+    for row in tqdm(data.itertuples(index=False), desc='Running FCFS'):
         tempStart = row[startIndex]
         tempEnd = row[endIndex]
         tempAssigned = False
@@ -649,10 +670,10 @@ def runFCFS(numSpots, data):
     # r = seq_curb(numSpots, data, (6 * 24))
 
 
-def runFullSetOfResults(numSpots, data, buffer, tau, weightDoubleParking, weightCruising, saveIndex=0):
+def runFullSetOfResults(numSpots, data, buffer, zeta, weightDoubleParking, weightCruising, saveIndex=0, tau=0):
     r = {}
 
-    buffer+=1
+    # buffer+=1
 
     t0 = datetime.now()
 
@@ -663,8 +684,8 @@ def runFullSetOfResults(numSpots, data, buffer, tau, weightDoubleParking, weight
 
     t1 = datetime.now()
     fullData = deepcopy(data)
-    fullTau = max(fullData.loc[:, 'Received'])-min(fullData.loc[:, 'Received'])-1
-    fullTau = 20000
+    fullZeta = max(fullData.loc[:, 'Received'])-min(fullData.loc[:, 'Received'])-1
+    fullZeta = 20000
     fullData.loc[:, 'Received_OG'] = fullData.loc[:, 'Received']
     fullData.loc[:, 'Received'] = -1
 
@@ -673,19 +694,20 @@ def runFullSetOfResults(numSpots, data, buffer, tau, weightDoubleParking, weight
     # except:
     #     r['full'] = None
     try:
-        r['full'] = runSlidingOptimization(fullData, numSpots, tau=fullTau, buffer=buffer,
+        r['full'] = runSlidingOptimization(fullData, numSpots, zeta=fullZeta, buffer=buffer,
                                            weightDoubleParking=weightDoubleParking, weightCruising=weightCruising,
-                                           timeLimit=10 * 60)
+                                           timeLimit=10 * 60 * 2)
     except Exception as e:
         r['full'] = e
     t2 = datetime.now()
     try:
-        r['sliding'] = runSlidingOptimization(deepcopy(data), numSpots, tau=tau, buffer=buffer,
-                                              weightDoubleParking=weightDoubleParking, weightCruising=weightCruising, timeLimit=tau*60)
+        r['sliding'] = runSlidingOptimization(deepcopy(data), numSpots, zeta=zeta, buffer=buffer,
+                                              weightDoubleParking=weightDoubleParking, weightCruising=weightCruising,
+                                              timeLimit=zeta * 60 * 2, tau=tau)
     except Exception as e:
         r['sliding'] = e
     t3 = datetime.now()
-    r['spec'] = {'numSpots':numSpots, 'buffer':buffer, 'tau':tau, 'weightDoubleParking':weightDoubleParking, 'weightCruising':weightCruising}
+    r['spec'] = {'numSpots':numSpots, 'buffer':buffer, 'zeta':zeta, 'weightDoubleParking':weightDoubleParking, 'weightCruising':weightCruising}
 
     r['FCFS-time'] = t1-t0
     r['full-time'] = t2 - t1
@@ -707,7 +729,7 @@ def runFullSetOfResults(numSpots, data, buffer, tau, weightDoubleParking, weight
         r['full-unassigned'] = e
 
 
-    saveFile = '/Users/connorforsythe/Library/CloudStorage/Box-Box/CMU/SmartCurbs/Results/2023-7-17-10MinLimit/Res-{}.dat'.format(saveIndex)
+    saveFile = '/Users/connorforsythe/Library/CloudStorage/Box-Box/CMU/SmartCurbs/Results/2023-11-16/Res-{}.dat'.format(saveIndex)
 
     with open(saveFile, 'wb') as file:
         pickle.dump(r, file)
@@ -717,7 +739,7 @@ def runFullSetOfResults(numSpots, data, buffer, tau, weightDoubleParking, weight
 
     return r
 
-def runFullSetOfResultsQuick(numSpots, data, buffer, tau, weightDoubleParking, weightCruising, saveIndex=0):
+def runFullSetOfResultsQuick(numSpots, data, buffer, zeta, weightDoubleParking, weightCruising, saveIndex=0):
     r = {}
 
     buffer += 1
@@ -731,7 +753,7 @@ def runFullSetOfResultsQuick(numSpots, data, buffer, tau, weightDoubleParking, w
 
     t1 = datetime.now()
     try:
-        r['sliding'] = runSlidingOptimization(deepcopy(data), numSpots, tau=tau, buffer=buffer,
+        r['sliding'] = runSlidingOptimization(deepcopy(data), numSpots, zeta=zeta, buffer=buffer,
                                               weightDoubleParking=weightDoubleParking, weightCruising=weightCruising,
                                               timeLimit=1 * 60)
     except Exception as e:
@@ -740,19 +762,19 @@ def runFullSetOfResultsQuick(numSpots, data, buffer, tau, weightDoubleParking, w
 
     r['sliding-time'] = t2 - t1
     fullData = deepcopy(data)
-    fullTau = max(fullData.loc[:, 'Received']) - min(fullData.loc[:, 'Received']) - 1
-    fullTau = 20000
+    fullZeta = max(fullData.loc[:, 'Received']) - min(fullData.loc[:, 'Received']) - 1
+    fullZeta = 20000
     fullData.loc[:, 'Received_OG'] = fullData.loc[:, 'Received']
     fullData.loc[:, 'Received'] = -1
 
     try:
-        r['full'] = runSlidingOptimization(fullData, numSpots, tau=fullTau, buffer=buffer,
+        r['full'] = runSlidingOptimization(fullData, numSpots, zeta=fullZeta, buffer=buffer,
                                            weightDoubleParking=weightDoubleParking, weightCruising=weightCruising,
-                                           timeLimit=min(r['sliding-time'].seconds+1, 1*60))
+                                           timeLimit=min(r['sliding-time'].seconds + 1, 1 * 60))
     except Exception as e:
         r['full'] = e
     t3 = datetime.now()
-    r['spec'] = {'numSpots': numSpots, 'buffer': buffer, 'tau': tau, 'weightDoubleParking': weightDoubleParking,
+    r['spec'] = {'numSpots': numSpots, 'buffer': buffer, 'zeta': zeta, 'weightDoubleParking': weightDoubleParking,
                  'weightCruising': weightCruising}
 
 
@@ -777,7 +799,7 @@ def runFullSetOfResultsQuick(numSpots, data, buffer, tau, weightDoubleParking, w
     except Exception as e:
         r['full-unassigned'] = e
 
-    saveFile = '/Users/connorforsythe/Library/CloudStorage/Box-Box/CMU/SmartCurbs/Results/2023-7-31-1MinLimit/Res-{}.dat'.format(
+    saveFile = '/Users/connorforsythe/Library/CloudStorage/Box-Box/CMU/SmartCurbs/Results/2023-10-24/Res-{}.dat'.format(
         saveIndex)
 
     with open(saveFile, 'wb') as file:
@@ -789,15 +811,44 @@ def runFullSetOfResultsQuick(numSpots, data, buffer, tau, weightDoubleParking, w
 def getNumUnassignedMinutes(data):
     return np.sum(data.loc[data.loc[:, 'Assigned']==0, 's_i'])
 
+
+def testFCFS(seed, a):
+    np.random.seed(seed)
+    j = simulateData(100, 0, a)
+    r = runFCFS(1, j)
+    r.loc[:, 'NotAssigned'] = 1 - r.loc[:, 'Assigned']
+    r = r.sort_values(['NotAssigned', 'a_i'])
+    prevLeave = None
+    newCol = []
+    for ind, row in r.iterrows():
+        if (prevLeave != None):
+            newCol.append(row['a_i'] - prevLeave)
+            prevLeave = row['d_i']
+        else:
+            newCol.append(0)
+            prevLeave = row['d_i']
+    r.loc[:, 'diff'] = newCol
+    r.loc[:, 'diff'] = r.loc[:, 'diff'] * r.loc[:, 'Assigned']
+    return np.sum(r.loc[:, 'diff'] < 0) > 0
+
 if __name__=='__main__':
     pass
     # #Data construction
     np.random.seed(8131970)
     np.random.seed(11111)
-    # np.random.seed(111)
+    np.random.seed(111)
     a = load_nhts_data()
-    j = simulateData(20,1, a, receivedDelta=5)
-    r = runSlidingOptimization(j, 1, buffer=0, tau=5)
+    outcomes = []
+    args = []
+
+    for i in range(5000):
+        args.append((i+1001, a))
+
+    with Pool() as pool:
+        outcomes = pool.starmap(testFCFS, args)
+
+    print(set(outcomes))
+    # r = runSlidingOptimization(j, 1, zeta=5, buffer=0)
     # # j.loc[:, 'Received'] = min(j.loc[:, 'Received'])
     # jc = deepcopy(j)
     # # j.loc[1, 's_i'] = 1

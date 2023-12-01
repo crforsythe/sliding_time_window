@@ -13,7 +13,7 @@ def load_raw_nhts_data(useCols=None):
         data = p.read_csv(file, usecols=useCols)
     return data
 
-def load_nhts_data():
+def load_nhts_data(windowShift = 10): #added windowShift
 
     tripDistCol = 'VMT_MILE'
     tripReasonCol = 'WHYTO'
@@ -47,10 +47,14 @@ def load_nhts_data():
 
     r = r.loc[r.loc[:, 'Urban Size']<6, :]
     # r = convert_to_day_minutes(r)
-    r = r.loc[r.loc[:, 'Start Time']>=(7*60), :]
+    r = r.loc[r.loc[:, 'Start Time'] >= (7*60), :]
     r = r.loc[r.loc[:, 'Start Time'] <= (18 * 60), :]
-    r = r.loc[r.loc[:, 'End Time'] <= (18 * 60), :]
+    #r = r.loc[r.loc[:, 'End Time'] <= (18 * 60), :] #Aaron rewritten to include dwell time and possible shift
+    r['Latest Depart Time'] = r['End Time'] + r['Dwell Time'] + windowShift #added by Aaron
+    r = r.loc[r['Latest Depart Time'] <= (18*60)] #added by Aaron
     r = apply_probabilities(r)
+    
+    
     return r
 
 
@@ -61,7 +65,7 @@ def select_n_trips(data, num_sample=50, replace=True):
         num_sample = num_rows
         return data
     else:
-        indicies = np.random.choice(num_rows, num_sample, p=data.loc[:, 'p'], replace=replace)
+        indicies = np.random.choice(a = num_rows, size = num_sample, p=data.loc[:, 'p'],  replace=True)
         sub_data = data.iloc[indicies, :]
         return sub_data
 

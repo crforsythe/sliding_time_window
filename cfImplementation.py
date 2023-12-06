@@ -6,10 +6,11 @@ import gurobipy as gp
 from gurobipy import GRB
 from collections import OrderedDict
 from tqdm import tqdm, trange
-from datetime import datetime
+from datetime import datetime, date
 from gurobipy import abs_ as gabs
 import pickle
 from multiprocessing import Pool
+import os
 import multiprocessing as mp
 # from execute_v2 import park_events_FCFS,runtime_FCFS
 from seq_arrival_new import seq_curb
@@ -417,12 +418,12 @@ def runFullOptimization(data, numSpaces, buffer, weightDoubleParking, weightCrui
     # m, t_i, x_i_j = createTimeShiftConstraints(m, t_i, x_i_j, data)
     # m = setModelParams(m, MIPGap=0.01, ModelSense=GRB.MINIMIZE, TimeLimit=numSeconds, Threads=1)
     m = setModelParams(m, MIPGap=0.0001, ModelSense=GRB.MINIMIZE, TimeLimit=numSeconds, Threads=1)
-    doubleParkObj = getExpectedDoubleParkExpression(data, x_i_j)
+    doubleParkObj = getDoubleParkExpression(data, x_i_j)
     cruisingObj = getExpectedCruisingExpression(data, x_i_j)
     # absDifferenceObj = getAbsoluteDeviationExpression(data, t_i)
     # m = setModelObjective(m, cruisingObj)
     m = setModelObjectiveN(m, doubleParkObj, 0, 1, weightDoubleParking)
-    m = setModelObjectiveN(m, cruisingObj, 1, 1, weightCruising)
+    # m = setModelObjectiveN(m, cruisingObj, 1, 1, weightCruising)
     # m, t_i, x_i_j, r_i, s_i = applyDeviationObjectiveVariables(m, t_i, x_i_j, data)
     t0 = m.status
     m.optimize()
@@ -801,13 +802,34 @@ def runFullSetOfResults(numSpots, data, buffer, zeta, weightDoubleParking, weigh
         r['full-unassigned'] = e
 
 
-    saveFile = '/Users/connorforsythe/Library/CloudStorage/Box-Box/CMU/SmartCurbs/Results/2023-11-29/Res-{}.dat'.format(saveIndex)
-    # saveFile = 'C:/Users/Aaron/Documents/GitHub/sliding_time_window-main/Output/2023-11-26-test/Res-'+str(idx)+'.dat'.format(saveIndex)
+    # saveFile = '/Users/connorforsythe/Library/CloudStorage/Box-Box/CMU/SmartCurbs/Results/2023-11-29/Res-{}.dat'.format(saveIndex)
+    # # saveFile = 'C:/Users/Aaron/Documents/GitHub/sliding_time_window-main/Output/2023-11-26-test/Res-'+str(idx)+'.dat'.format(saveIndex)
+    #
+    # try:
+    #     with open(saveFile, 'wb') as file:
+    #         pickle.dump(r, file)
+    #         file.close()
+    # except TypeError as e:
+    #     print(e)
+
+    #ChatGPT generated code for more robust saving
+    # Determine the current date and format it
+    current_date = date.today().strftime('%Y-%m-%d')
+
+    # Define the base path for saving files
+    base_path = '/Users/connorforsythe/Library/CloudStorage/Box-Box/CMU/SmartCurbs/Results/'
+
+    # Create a folder with the formatted date if it doesn't exist
+    folder_path = os.path.join(base_path, current_date)
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+
+    # Define the file path for saving
+    saveFile = os.path.join(folder_path, f'Res-{saveIndex}.dat')
 
     try:
         with open(saveFile, 'wb') as file:
             pickle.dump(r, file)
-            file.close()
     except TypeError as e:
         print(e)
 

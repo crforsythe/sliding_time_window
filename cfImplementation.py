@@ -501,10 +501,10 @@ def runSlidingOptimization(data, numSpaces, zeta=5, start=0, stop=(24*60)+1, buf
             m, t_i = createTimeWindowConstraints(m, t_i, tempData)
             m, t_i, x_i_j = createTimeShiftConstraints(m, t_i, x_i_j, tempData)
             m = setModelParams(m, TimeLimit=timeLimit, MIPGap=0.01, ModelSense=GRB.MINIMIZE, Threads=1)
-            doubleParkObj = getExpectedDoubleParkExpression(tempData, x_i_j)
-            cruisingObj = getExpectedCruisingExpression(tempData, x_i_j) #Aaron changed data to tempData
+            doubleParkObj = getDoubleParkExpression(tempData, x_i_j)
+            # cruisingObj = getExpectedCruisingExpression(tempData, x_i_j) #Aaron changed data to tempData
             m = setModelObjectiveN(m, doubleParkObj, 0, 1, weightDoubleParking)
-            m = setModelObjectiveN(m, cruisingObj, 1, 1, weightCruising)
+            # m = setModelObjectiveN(m, cruisingObj, 1, 1, weightCruising)
             m, t_i, x_i_j = applyDeviationObjectiveVariables(m, t_i, x_i_j, tempData)
 
 

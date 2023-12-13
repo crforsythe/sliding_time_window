@@ -135,7 +135,7 @@ def createPersistentTimeDecisionConstraints(model, t_i, pastInfo, data, currentT
     for index, row in data.iterrows():
         if(row['a_i_OG-nu']<=currentTime and index in pastTimes.keys()):
             pastTime = pastTimes[index]
-            model.addConstr(t_i[i]==pastTime, name='Prev-T-{}'.format(index))
+            model.addConstr(t_i[i]==round(pastTime), name='Prev-T-{}'.format(index))
             t_i[i].Start = pastTime
         i+=1
     return model, t_i
@@ -518,6 +518,22 @@ def runSlidingOptimization(data, numSpaces, zeta=5, start=0, stop=(24*60)+1, buf
                 print('{} Termination Code for Run {}'.format(m.status, saveID))
                 # printFullModel(m)
                 m.write('debug/debug-{}.lp'.format(saveID))
+                
+                # print("The model is infeasible; computing IIS")
+                # m.computeIIS()
+                # if m.IISMinimal:
+                #     print("IIS is minimal\n")
+                # else:
+                #     print("IIS is not minimal\n")
+                # print("\nThe following constraint(s) cannot be satisfied:")
+                # const = []
+                # for c in m.getConstrs():
+                #     if c.IISConstr:
+                #         print(c.ConstrName) 
+                #         const.append(c.ConstrName)
+                # with open ('debug/debug computeISS-{}.lp'.format(saveID), 'wb') as fp:
+                #     pickle.dump(const, fp)
+                        
 
 
 
@@ -736,7 +752,7 @@ def runFCFS(numSpots, data):
     # r = seq_curb(numSpots, data, (6 * 24))
 
 
-def runFullSetOfResults(numSpots, data, buffer, zeta, weightDoubleParking, weightCruising, saveIndex=0, tau=0):
+def runFullSetOfResults(numSpots, data, buffer, zeta, weightDoubleParking, weightCruising, saveIndex=0, tau=0, rho=0, nu=0):
     r = {}
     
     r['OG_index'] = saveIndex
@@ -772,15 +788,15 @@ def runFullSetOfResults(numSpots, data, buffer, zeta, weightDoubleParking, weigh
     try:
         r['sliding'] = runSlidingOptimization(deepcopy(data), numSpots, zeta=zeta, buffer=buffer,
                                               weightDoubleParking=weightDoubleParking, weightCruising=weightCruising,
-                                              timeLimit=30, tau=tau, returnBoth=False, saveID=saveIndex)
+                                              timeLimit=30, tau=tau, returnBoth=False, saveID=saveIndex, rho=rho, nu=nu)
     except Exception as e:
         r['sliding'] = e
         r['sliding'] = runSlidingOptimization(deepcopy(data), numSpots, zeta=zeta, buffer=buffer,
                                               weightDoubleParking=weightDoubleParking, weightCruising=weightCruising,
-                                              timeLimit=30, tau=tau, returnBoth=True, saveID=saveIndex)
+                                              timeLimit=30, tau=tau, returnBoth=True, saveID=saveIndex, rho=rho, nu=nu)
     t3 = datetime.now()
     r['spec'] = {'numSpots':numSpots, 'buffer':buffer, 'zeta':zeta, 'weightDoubleParking':weightDoubleParking, 'weightCruising':weightCruising,
-                 'tau':tau, 'numVehicles': len(data)}
+                 'tau':tau, 'numVehicles': len(data), 'rho': rho, 'nu': nu}
 
     r['FCFS-time'] = t1-t0
     r['full-time'] = t2 - t1
@@ -802,36 +818,36 @@ def runFullSetOfResults(numSpots, data, buffer, zeta, weightDoubleParking, weigh
         r['full-unassigned'] = e
 
 
-    # saveFile = '/Users/connorforsythe/Library/CloudStorage/Box-Box/CMU/SmartCurbs/Results/2023-11-29/Res-{}.dat'.format(saveIndex)
-    # # saveFile = 'C:/Users/Aaron/Documents/GitHub/sliding_time_window-main/Output/2023-11-26-test/Res-'+str(idx)+'.dat'.format(saveIndex)
-    #
-    # try:
-    #     with open(saveFile, 'wb') as file:
-    #         pickle.dump(r, file)
-    #         file.close()
-    # except TypeError as e:
-    #     print(e)
-
-    #ChatGPT generated code for more robust saving
-    # Determine the current date and format it
-    current_date = date.today().strftime('%Y-%m-%d')
-
-    # Define the base path for saving files
-    base_path = '/Users/connorforsythe/Library/CloudStorage/Box-Box/CMU/SmartCurbs/Results/'
-
-    # Create a folder with the formatted date if it doesn't exist
-    folder_path = os.path.join(base_path, current_date)
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-
-    # Define the file path for saving
-    saveFile = os.path.join(folder_path, f'Res-{saveIndex}.dat')
-
+    #saveFile = '/Users/connorforsythe/Library/CloudStorage/Box-Box/CMU/SmartCurbs/Results/2023-11-29/Res-{}.dat'.format(saveIndex)
+    saveFile = 'C:/Users/Aaron/Documents/GitHub/sliding_time_window_data/Aaron runs #3 (12 Dec 2023)/Res-{}.dat'.format(saveIndex)
+    
     try:
         with open(saveFile, 'wb') as file:
             pickle.dump(r, file)
+            file.close()
     except TypeError as e:
         print(e)
+
+    # #ChatGPT generated code for more robust saving
+    # # Determine the current date and format it
+    # current_date = date.today().strftime('%Y-%m-%d')
+
+    # # Define the base path for saving files
+    # base_path = '/Users/connorforsythe/Library/CloudStorage/Box-Box/CMU/SmartCurbs/Results/'
+
+    # # Create a folder with the formatted date if it doesn't exist
+    # folder_path = os.path.join(base_path, current_date)
+    # if not os.path.exists(folder_path):
+    #     os.makedirs(folder_path)
+
+    # # Define the file path for saving
+    # saveFile = os.path.join(folder_path, f'Res-{saveIndex}.dat')
+
+    # try:
+    #     with open(saveFile, 'wb') as file:
+    #         pickle.dump(r, file)
+    # except TypeError as e:
+    #     print(e)
 
 
 

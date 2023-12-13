@@ -76,6 +76,8 @@ if __name__ == '__main__':
     # tauValues = [5]
     replications = 1 #added by Aaron
     windowShift = 10 #added by Aaron
+    rhoValues = [0, 60]
+    nuValues = [0, 60]
 
     # numSpots = [10]
     # numSpots[0] = 1
@@ -153,7 +155,7 @@ if __name__ == '__main__':
 # Connor's original code   
 
     i = 0
-    reps = range(1)
+    reps = range(0,3)
     for rep in reps:
         for numSpot in numSpots:
             totalNumVehicles = list(range(11*numSpot, 34*numSpot, 11*numSpot))
@@ -171,24 +173,26 @@ if __name__ == '__main__':
                         for tauValue in tauValues:
                             for bufferValue in bufferValues:
                                 for zetaValue in zetaValues:
-                                    tempArg = (numSpot, tempData, bufferValue, zetaValue, doubleParkWeight, cruisingWeight, i, tauValue)
-
-                                    if i == 8:
-                                        print('i = ' + str(i))
-                                    runFullSetOfResults(*tempArg)
-                                    if (numSpot == 1 and doubleParkWeight == 100 and numVehicles == 77):
-                                        args.append(tempArg)
-                                    else:
-                                        args.append(tempArg)
-                                        pass
-                                    i += 1
-                                    print(i)
-
-    # mp.set_start_method('fork')
-    #                 numThreads = mp.cpu_count()-2
-    #                 #numThreads = 4
-    #                 chunkSize = max(int(len(args)/numThreads), 1)
-    #                 np.random.shuffle(args)
-    #                 with Pool(numThreads) as pool:
-    #                     r = pool.starmap(runFullSetOfResults, args, chunksize=chunkSize)
-    #                     pool.close()
+                                    for rhoValue in rhoValues:
+                                        for nuValue in nuValues:
+                                            tempArg = (numSpot, tempData, bufferValue, zetaValue, doubleParkWeight, cruisingWeight, i, tauValue, rhoValue, nuValue) #, rhoValue, nuValue
+        
+                                            # if i == 8:
+                                            #     print('i = ' + str(i))
+                                            runFullSetOfResults(*tempArg)
+                                            if (numSpot == 1 and doubleParkWeight == 100 and numVehicles == 77):
+                                                args.append(tempArg)
+                                            else:
+                                                args.append(tempArg)
+                                                pass
+                                            i += 1
+                                            print(i)
+        
+                    #mp.set_start_method('fork')
+                    numThreads = mp.cpu_count()-2
+                    #numThreads = 4
+                    chunkSize = max(int(len(args)/numThreads), 1)
+                    np.random.shuffle(args)
+                    with Pool(numThreads) as pool:
+                        r = pool.starmap(runFullSetOfResults, args, chunksize=chunkSize)
+                        pool.close()
